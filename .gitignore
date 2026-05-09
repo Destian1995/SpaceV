@@ -1,0 +1,18 @@
+# Godot 4 .gitignore
+
+# Godot-specific ignores
+.godot/
+*.translation
+
+# Export directories
+export/
+builds/
+
+# Mono/C# specifics
+.mono/
+data_*/
+mono_crash.*.json
+
+# OS generated
+.DS_Store
+Thumbs.db
