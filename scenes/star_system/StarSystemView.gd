@@ -20,6 +20,11 @@ var time_e:      float   = 0.0
 
 var enemies: Array = []
 var spaceport_ui = null  # CanvasLayer instance
+var _combat_triggered: bool = false
+
+# Camera pan
+var cam_pan:    Vector2 = Vector2.ZERO
+var _dragging:  bool    = false
 
 const ENEMY_CHASE_RANGE   := 180.0
 const ENEMY_ATTACK_RANGE  := 60.0
@@ -59,15 +64,44 @@ func _ready() -> void:
 	_gen_bg_stars()
 	_gen_planets()
 	_gen_enemies()
-	if enemies.is_empty():
-		lbl_status.text = "Нажмите на планету чтобы лететь к ней"
-	else:
-		lbl_status.text = "⚠️ Обнаружено враждебных судов: %d — будьте осторожны!" % enemies.size()
-	# Load spaceport
+
+	# Load spaceport BEFORE any await so it's always ready
 	spaceport_ui = preload("res://scenes/spaceport/Spaceport.tscn").instantiate()
 	add_child(spaceport_ui)
 	spaceport_ui.visible = false
 	spaceport_ui.spaceport_closed.connect(func(): spaceport_ui.visible = false)
+
+	# After combat — handle result
+	var result := GameManager.combat_result
+	GameManager.combat_result = ""
+	if result == "won":
+		var eid := GameManager.pending_enemy_id
+		for idx in range(enemies.size() - 1, -1, -1):
+			if enemies[idx].get("id", -2) == eid:
+				enemies.remove_at(idx)
+				break
+		_combat_triggered = true
+		lbl_status.text = "✅ Победа! Пират уничтожен."
+		if enemies.size() > 0:
+			lbl_status.text += "  Осталось врагов: %d" % enemies.size()
+		await get_tree().create_timer(4.0).timeout
+		_combat_triggered = false
+	elif result == "lost":
+		_combat_triggered = true
+		lbl_status.text = "⚠ Корабль повреждён — %d%% корпуса. Найдите космопорт для ремонта!" \
+			% int(GameManager.ship_hull_pct * 100)
+		await get_tree().create_timer(5.0).timeout
+		_combat_triggered = false
+	elif result == "retreat":
+		_combat_triggered = true
+		lbl_status.text = "🏃 Вы отступили. Враги всё ещё в системе!"
+		await get_tree().create_timer(5.0).timeout
+		_combat_triggered = false
+	else:
+		if enemies.is_empty():
+			lbl_status.text = "Нажмите на планету чтобы лететь к ней"
+		else:
+			lbl_status.text = "⚠️ Обнаружено враждебных судов: %d — будьте осторожны!" % enemies.size()
 
 func _gen_bg_stars() -> void:
 	var rng := RandomNumberGenerator.new()
@@ -158,6 +192,7 @@ func _gen_enemies() -> void:
 		epos = epos.clamp(Vector2(40, 40), vp - Vector2(40, 40))
 		var hull_max: int = 60 + danger * 20
 		enemies.append({
+			"id":        i,
 			"pos":       epos,
 			"angle":     rng.randf_range(0, TAU),
 			"patrol_center": epos,
@@ -179,7 +214,20 @@ func _process(delta: float) -> void:
 	_move_ship(delta)
 	_update_enemies(delta)
 	_check_proximity()
+	_check_enemy_hover()
 	queue_redraw()
+
+func _check_enemy_hover() -> void:
+	if _combat_triggered:
+		return
+	var mp := get_global_mouse_position()
+	for e in enemies:
+		var e_screen: Vector2 = e["pos"] + cam_pan
+		var e_sz: float = 13.0 if e["variant"] == 0 else (17.0 if e["variant"] == 1 else 22.0)
+		if mp.distance_to(e_screen) < e_sz + 14:
+			var tag := "РАЗВЕДЧИК" if e["variant"] == 0 else ("ИСТРЕБИТЕЛЬ" if e["variant"] == 1 else "ТЯЖЁЛЫЙ")
+			lbl_status.text = "⚔ [ЛКМ] Атаковать %s — ❤ %d/%d" % [tag, e["hull"], e["hull_max"]]
+			return
 
 func _update_enemies(delta: float) -> void:
 	for e in enemies:
@@ -221,6 +269,11 @@ func _update_enemies(delta: float) -> void:
 		# Tick down hit flash
 		if e["hit_flash"] > 0.0:
 			e["hit_flash"] = max(0.0, e["hit_flash"] - delta * 4.0)
+
+		# Trigger combat when enemy reaches player
+		if not _combat_triggered and e["state"] == "chase" and dist_to_player < ENEMY_ATTACK_RANGE:
+			_combat_triggered = true
+			_enter_combat(e)
 
 func _update_orbits(delta: float) -> void:
 	for p in planets:
@@ -266,18 +319,54 @@ func _refresh_planet_panel() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if spaceport_ui and spaceport_ui.visible:
 		return
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		var mp := get_global_mouse_position()
-		for i in planets.size():
-			var p = planets[i]
-			if mp.distance_to(p["pos"]) < p["size"] + 12:
-				_fly_to(i)
-				return
+		if event.pressed:
+			# Check enemy ship click — player initiates attack
+			for e in enemies:
+				var e_screen: Vector2 = e["pos"] + cam_pan
+				var e_sz: float = 13.0 if e["variant"] == 0 else (17.0 if e["variant"] == 1 else 22.0)
+				if mp.distance_to(e_screen) < e_sz + 14:
+					_attack_enemy(e)
+					return
+			# Check planet click (account for cam_pan)
+			for i in planets.size():
+				var p = planets[i]
+				if mp.distance_to(p["pos"] + cam_pan) < p["size"] + 12:
+					_fly_to(i)
+					return
+			# Start drag
+			_dragging = true
+		else:
+			_dragging = false
+
+	if event is InputEventMouseMotion and _dragging:
+		cam_pan += event.relative
+		queue_redraw()
+		return
 
 func _fly_to(idx: int) -> void:
 	target_idx   = idx
 	ship_moving  = true
 	lbl_status.text = "⚡ Курс на %s..." % planets[idx]["name"]
+
+func _attack_enemy(enemy: Dictionary) -> void:
+	if _combat_triggered:
+		return
+	_combat_triggered = true
+	var tag := "РАЗВЕДЧИК" if enemy["variant"] == 0 else ("ИСТРЕБИТЕЛЬ" if enemy["variant"] == 1 else "ТЯЖЁЛЫЙ")
+	lbl_status.text = "⚔ Атакуем %s! Подготовка к бою..." % tag
+	await get_tree().create_timer(0.5).timeout
+	_enter_combat(enemy)
+
+func _enter_combat(enemy: Dictionary) -> void:
+	GameManager.pending_enemy_variant = enemy.get("variant", 1)
+	GameManager.pending_enemy_hull    = enemy.get("hull", 80)
+	GameManager.pending_enemy_id      = enemy.get("id", -1)
+	lbl_status.text = "⚠ Враг атакует! Входим в боевой режим..."
+	await get_tree().create_timer(0.6).timeout
+	get_tree().change_scene_to_file("res://scenes/combat/CombatScene.tscn")
 
 func _on_land() -> void:
 	if near_idx < 0:
@@ -306,6 +395,9 @@ func _draw() -> void:
 		var br: float = s["br"] + sin(time_e * s.get("spd", 0.8) + s["ph"]) * 0.18
 		var sz: float = s["r"] * (0.8 + sin(time_e * s.get("spd", 1.0) * 1.3 + s["ph"]) * 0.2)
 		draw_circle(s["pos"], sz, Color(br * s["cr"], br * s["cg"], br * s["cb"], br))
+
+	# Apply camera pan to all world objects (not background)
+	draw_set_transform(cam_pan)
 
 	# ── Orbit rings ─────────────────────────────────────────────────────────
 	for idx in planets.size():
@@ -341,27 +433,55 @@ func _draw() -> void:
 	# ── Player ship ─────────────────────────────────────────────────────────
 	_draw_ship()
 
+	# Reset transform (UI elements stay fixed)
+	draw_set_transform(Vector2.ZERO)
+
 func _draw_star() -> void:
-	var pulse: float = sin(time_e * 1.3) * 0.03
+	var pulse: float = sin(time_e * 1.3) * 0.018
 
-	# Corona layers — wide soft glow
-	draw_circle(STAR_POS, 130, Color(1.0, 0.55, 0.1, 0.025 + pulse))
-	draw_circle(STAR_POS, 100, Color(1.0, 0.65, 0.15, 0.05 + pulse))
-	draw_circle(STAR_POS, 78,  Color(1.0, 0.72, 0.2, 0.10))
-	draw_circle(STAR_POS, 60,  Color(1.0, 0.80, 0.3, 0.20))
-	draw_circle(STAR_POS, 46,  Color(1.0, 0.88, 0.42, 0.55))
-	draw_circle(STAR_POS, 34,  Color(1.0, 0.93, 0.6, 0.88))
-	draw_circle(STAR_POS, 22,  Color(1.0, 0.97, 0.82, 0.97))
-	draw_circle(STAR_POS, 13,  Color(1.0, 1.0,  0.97, 1.0))
+	# ── Ultra-smooth corona: 120 thin layers, two-zone blending ─────────────
+	# Zone 1: outer halo (r 220 → 60) — very faint, many circles
+	var outer_n := 70
+	for i in outer_n:
+		var t: float   = float(i) / float(outer_n - 1)   # 0=far 1=edge-of-body
+		var tt: float  = t * t
+		var ttt: float = tt * t
+		var r: float   = lerp(220.0, 60.0, tt)
+		# Alpha: exponential ramp, each circle very faint so 70 layers sum smoothly
+		var a: float   = (0.0018 + 0.008 * ttt) * (1.0 + pulse * t)
+		var cr: float  = lerp(0.80, 1.0,  tt)
+		var cg: float  = lerp(0.38, 0.88, tt)
+		var cb: float  = lerp(0.04, 0.55, ttt)
+		draw_circle(STAR_POS, r, Color(cr, cg, cb, a))
 
-	# Solar flare rays
+	# Zone 2: body glow (r 65 → 22) — denser, transitions to solid
+	var inner_n := 50
+	for i in inner_n:
+		var t: float   = float(i) / float(inner_n - 1)
+		var tt: float  = t * t
+		var ttt: float = tt * t
+		var r: float   = lerp(65.0, 22.0, tt)
+		var a: float   = lerp(0.018, 0.72, ttt) + pulse * tt
+		var cr: float  = lerp(1.0, 1.0,  t)
+		var cg: float  = lerp(0.72, 0.97, tt)
+		var cb: float  = lerp(0.14, 0.86, ttt)
+		draw_circle(STAR_POS, r, Color(cr, cg, cb, a))
+
+	# Solid core — bright centre
+	draw_circle(STAR_POS, 22, Color(1.0, 0.98, 0.88, 1.0))
+	draw_circle(STAR_POS, 14, Color(1.0, 1.0,  0.96, 1.0))
+	draw_circle(STAR_POS,  7, Color(1.0, 1.0,  1.0,  1.0))
+
+	# Solar flare rays — tapered lines with glow
 	for ray in 8:
-		var angle: float = ray / 8.0 * TAU + time_e * 0.08
-		var r0: float = 34.0
-		var r1: float = 68.0 + sin(time_e * 1.8 + ray) * 12.0
-		var p0: Vector2 = STAR_POS + Vector2(cos(angle), sin(angle)) * r0
-		var p1: Vector2 = STAR_POS + Vector2(cos(angle), sin(angle)) * r1
-		draw_line(p0, p1, Color(1.0, 0.85, 0.3, 0.12 + sin(time_e * 2.0 + ray) * 0.06), 2.5)
+		var angle: float = ray / 8.0 * TAU + time_e * 0.07
+		var r0: float = 28.0
+		var r1: float = 70.0 + sin(time_e * 1.9 + ray * 1.3) * 14.0
+		var a0: float = 0.22 + sin(time_e * 2.1 + ray) * 0.08
+		var pa: Vector2 = STAR_POS + Vector2(cos(angle), sin(angle)) * r0
+		var pb: Vector2 = STAR_POS + Vector2(cos(angle), sin(angle)) * r1
+		draw_line(pa, pb, Color(1.0, 0.88, 0.35, a0 * 0.5), 3.5)
+		draw_line(pa, pb, Color(1.0, 0.95, 0.60, a0), 1.5)
 
 func _draw_planet(i: int) -> void:
 	var p   = planets[i]
@@ -370,10 +490,16 @@ func _draw_planet(i: int) -> void:
 	var sz:  float   = p["size"]
 	var ptype: String = p.get("type", "")
 
-	# ── Atmosphere glow ──────────────────────────────────────────────────────
-	var atm_col := Color(col.r * 0.6, col.g * 0.7, col.b * 0.9, 0.12)
-	draw_circle(pos, sz + 10, atm_col)
-	draw_circle(pos, sz + 6,  Color(atm_col.r, atm_col.g, atm_col.b, 0.18))
+	# ── Atmosphere glow — smooth gradient (8 layers, quadratic falloff) ────────
+	var atm_cr: float = clampf(col.r * 0.62 + 0.12, 0, 1)
+	var atm_cg: float = clampf(col.g * 0.70 + 0.10, 0, 1)
+	var atm_cb: float = clampf(col.b * 0.95 + 0.05, 0, 1)
+	for ai in 8:
+		var t: float  = float(ai) / 7.0           # 0=outer 1=inner
+		var tt: float = t * t
+		var r: float  = sz + 22.0 * (1.0 - tt)   # larger circle = outer, small alpha
+		var a: float  = 0.022 * (1.0 - t) * (1.0 - t)
+		draw_circle(pos, r, Color(atm_cr, atm_cg, atm_cb, a))
 
 	# ── Planet body ──────────────────────────────────────────────────────────
 	# Base color
@@ -517,46 +643,196 @@ func _draw_enemy(e: Dictionary) -> void:
 		tag, HORIZONTAL_ALIGNMENT_CENTER, 80, 10, Color(1.0, 0.35, 0.25, 0.7))
 
 func _draw_ship() -> void:
-	var sz:    float   = 16.0
+	var ship_type:  String = GameManager.current_ship.get("ship_type", "Исследовательский")
+	var ship_class: String = GameManager.current_ship.get("ship_class", "C")
 	var fwd:   Vector2 = Vector2(sin(ship_angle), -cos(ship_angle))
 	var right: Vector2 = fwd.rotated(PI / 2.0)
-	var tip:   Vector2 = ship_pos + fwd * sz
-	var back:  Vector2 = ship_pos - fwd * sz * 0.55
 
-	# Engine glow (always present, brighter when moving)
-	var eng_alpha: float = 0.18 + (0.4 if ship_moving else 0.0)
-	draw_circle(back, 7.0, Color(0.3, 0.6, 1.0, eng_alpha))
+	# Base size by class
+	var sz: float = 13.0
+	match ship_class:
+		"A": sz = 20.0
+		"B": sz = 16.0
+		"C": sz = 13.0
 
-	# Engine trail particles
+	match ship_type:
+		"Грузовой":            _draw_ship_cargo(ship_pos, fwd, right, sz)
+		"Боевой":              _draw_ship_combat(ship_pos, fwd, right, sz)
+		"Ресурсодобывающий":   _draw_ship_mining(ship_pos, fwd, right, sz)
+		"Флагманский":         _draw_ship_flagship(ship_pos, fwd, right, sz)
+		_:                     _draw_ship_scout(ship_pos, fwd, right, sz)
+
+# ── Engine exhaust helper ─────────────────────────────────────────────────────
+func _draw_engine(pos: Vector2, fwd: Vector2, sz: float, col: Color) -> void:
+	var ef := 0.18 + (0.45 if ship_moving else 0.0)
+	draw_circle(pos, sz, Color(col.r, col.g, col.b, ef))
 	if ship_moving:
-		var flicker: float = 0.6 + sin(time_e * 30.0) * 0.35
-		# Main exhaust
-		draw_circle(back - fwd * 3,  6.5 * flicker, Color(0.35, 0.65, 1.0, 0.80))
-		draw_circle(back - fwd * 10, 4.5 * flicker, Color(0.55, 0.80, 1.0, 0.55))
-		draw_circle(back - fwd * 17, 3.0 * flicker, Color(0.75, 0.92, 1.0, 0.35))
-		draw_circle(back - fwd * 24, 1.8 * flicker, Color(0.9,  1.0,  1.0, 0.18))
-		# Side micro-thrusters
-		draw_circle(back + right * 5 - fwd * 2, 2.5 * flicker, Color(0.4, 0.7, 1.0, 0.5))
-		draw_circle(back - right * 5 - fwd * 2, 2.5 * flicker, Color(0.4, 0.7, 1.0, 0.5))
+		var fl := 0.58 + sin(time_e * 28.0) * 0.30
+		draw_circle(pos - fwd * sz * 0.6, sz * 0.80 * fl, Color(col.r, col.g, col.b, ef * 0.85))
+		draw_circle(pos - fwd * sz * 1.4, sz * 0.55 * fl, Color(col.r + 0.15, col.g + 0.05, col.b, ef * 0.55))
+		draw_circle(pos - fwd * sz * 2.4, sz * 0.32 * fl, Color(1.0, col.g + 0.2, 1.0, ef * 0.28))
+		draw_circle(pos - fwd * sz * 3.5, sz * 0.18 * fl, Color(1.0, 1.0, 1.0, ef * 0.14))
 
-	# Ship hull — main body
-	var wing_l: Vector2 = ship_pos - fwd * sz * 0.1 + right * sz * 0.85
-	var wing_r: Vector2 = ship_pos - fwd * sz * 0.1 - right * sz * 0.85
-	var tail_l: Vector2 = back + right * sz * 0.35
-	var tail_r: Vector2 = back - right * sz * 0.35
+# ── Scout / Explorer ─────────────────────────────────────────────────────────
+func _draw_ship_scout(pos: Vector2, fwd: Vector2, right: Vector2, sz: float) -> void:
+	var back  := pos - fwd * sz * 0.65
+	var tip   := pos + fwd * sz * 1.15   # elongated nose
+	var wl    := pos - fwd * sz * 0.1 + right * sz * 0.70
+	var wr    := pos - fwd * sz * 0.1 - right * sz * 0.70
+	var tl    := back + right * sz * 0.28
+	var tr    := back - right * sz * 0.28
 
-	draw_colored_polygon([tip, wing_l, tail_l, back, tail_r, wing_r],
-		Color(0.18, 0.55, 0.90, 0.95))
+	_draw_engine(back, fwd, sz * 0.45, Color(0.30, 0.65, 1.0))
 
-	# Hull accent stripe
-	draw_colored_polygon([tip, ship_pos + right * sz * 0.15, back, ship_pos - right * sz * 0.15],
-		Color(0.55, 0.82, 1.0, 0.55))
+	draw_colored_polygon([tip, wl, tl, back, tr, wr], Color(0.18, 0.52, 0.90, 0.95))
+	draw_colored_polygon([tip, pos + right * sz * 0.14, back, pos - right * sz * 0.14],
+		Color(0.50, 0.80, 1.0, 0.52))
 
-	# Cockpit glow
-	var cock: Vector2 = ship_pos + fwd * sz * 0.38
-	draw_circle(cock, 3.8, Color(0.7, 0.95, 1.0, 0.85))
-	draw_circle(cock, 2.0, Color(1.0, 1.0, 1.0, 0.9))
+	var cock := pos + fwd * sz * 0.62
+	draw_circle(cock, sz * 0.26, Color(0.65, 0.92, 1.0, 0.88))
+	draw_circle(cock, sz * 0.14, Color(1.0,  1.0,  1.0, 0.94))
+	draw_circle(wl, 2.0, Color(1.0, 0.28, 0.28, 0.88))
+	draw_circle(wr, 2.0, Color(0.28, 1.0, 0.45, 0.88))
 
-	# Wing tip lights
-	draw_circle(wing_l, 2.2, Color(1.0, 0.3, 0.3, 0.9))
-	draw_circle(wing_r, 2.2, Color(0.3, 1.0, 0.4, 0.9))
+# ── Cargo / Freighter ─────────────────────────────────────────────────────────
+func _draw_ship_cargo(pos: Vector2, fwd: Vector2, right: Vector2, sz: float) -> void:
+	# Wide rectangular hull with side cargo pods
+	var back  := pos - fwd * sz * 0.75
+	var tip   := pos + fwd * sz * 0.80
+	var wl    := pos + right * sz * 1.20   # very wide
+	var wr    := pos - right * sz * 1.20
+	var tl    := back + right * sz * 1.05
+	var tr    := back - right * sz * 1.05
+
+	# Dual side engines
+	_draw_engine(back + right * sz * 0.55, fwd, sz * 0.38, Color(0.55, 0.75, 0.40))
+	_draw_engine(back - right * sz * 0.55, fwd, sz * 0.38, Color(0.55, 0.75, 0.40))
+
+	# Main boxy hull
+	draw_colored_polygon([tip, wl, tl, back, tr, wr], Color(0.45, 0.50, 0.38, 0.92))
+	# Central body accent (darker)
+	draw_colored_polygon([tip, pos + right * sz * 0.35, back, pos - right * sz * 0.35],
+		Color(0.60, 0.65, 0.48, 0.65))
+	# Cargo module stripes
+	for stripe in 3:
+		var sy: float = lerp(-sz * 0.55, sz * 0.55, float(stripe) / 2.0)
+		var sx: float = sz * 0.80
+		draw_line(pos + right * sz * 0.40 + fwd * sy * 0.3,
+				  pos - right * sz * 0.40 + fwd * sy * 0.3,
+				  Color(0.75, 0.80, 0.58, 0.30), 2.0)
+
+	var cock := pos + fwd * sz * 0.55
+	draw_circle(cock, sz * 0.22, Color(0.78, 0.92, 0.72, 0.85))
+	draw_circle(cock, sz * 0.12, Color(1.0,  1.0,  0.90, 0.92))
+	draw_circle(wl, 2.2, Color(1.0, 0.85, 0.20, 0.88))
+	draw_circle(wr, 2.2, Color(1.0, 0.85, 0.20, 0.88))
+
+# ── Combat / Warship ──────────────────────────────────────────────────────────
+func _draw_ship_combat(pos: Vector2, fwd: Vector2, right: Vector2, sz: float) -> void:
+	# Aggressive delta-wing silhouette
+	var back  := pos - fwd * sz * 0.60
+	var tip   := pos + fwd * sz * 1.10
+	var wl    := pos - fwd * sz * 0.55 + right * sz * 1.35  # swept far back
+	var wr    := pos - fwd * sz * 0.55 - right * sz * 1.35
+	var tl    := back + right * sz * 0.22
+	var tr    := back - right * sz * 0.22
+
+	# Twin engines
+	_draw_engine(back + right * sz * 0.30, fwd, sz * 0.40, Color(0.80, 0.30, 0.20))
+	_draw_engine(back - right * sz * 0.30, fwd, sz * 0.40, Color(0.80, 0.30, 0.20))
+
+	# Hull
+	draw_colored_polygon([tip, wl, tl, back, tr, wr], Color(0.22, 0.28, 0.45, 0.96))
+	# Spine accent
+	draw_colored_polygon([tip, pos + right * sz * 0.12, back, pos - right * sz * 0.12],
+		Color(0.42, 0.58, 0.88, 0.60))
+	# Wing edge line (sharp highlight)
+	draw_line(tip, wl, Color(0.50, 0.70, 1.0, 0.45), 1.5)
+	draw_line(tip, wr, Color(0.50, 0.70, 1.0, 0.45), 1.5)
+	# Gun barrels
+	draw_line(tip, tip + fwd * sz * 0.55, Color(0.55, 0.72, 1.0, 0.75), 2.5)
+	draw_circle(tip + fwd * sz * 0.52, sz * 0.10, Color(0.70, 0.90, 1.0, 0.85))
+
+	var cock := pos + fwd * sz * 0.42
+	draw_circle(cock, sz * 0.20, Color(0.55, 0.78, 1.0, 0.88))
+	draw_circle(cock, sz * 0.11, Color(1.0,  1.0,  1.0, 0.95))
+	draw_circle(wl, 2.0, Color(1.0, 0.20, 0.20, 0.92))
+	draw_circle(wr, 2.0, Color(1.0, 0.20, 0.20, 0.92))
+
+# ── Mining / Resource ─────────────────────────────────────────────────────────
+func _draw_ship_mining(pos: Vector2, fwd: Vector2, right: Vector2, sz: float) -> void:
+	# Squat and wide with forward drill arms
+	var back  := pos - fwd * sz * 0.65
+	var tip   := pos + fwd * sz * 0.70
+	var wl    := pos + right * sz * 1.10
+	var wr    := pos - right * sz * 1.10
+	var tl    := back + right * sz * 0.90
+	var tr    := back - right * sz * 0.90
+
+	# Single heavy engine
+	_draw_engine(back, fwd, sz * 0.55, Color(0.90, 0.55, 0.15))
+
+	# Boxy body
+	draw_colored_polygon([tip, wl, tl, back, tr, wr], Color(0.50, 0.38, 0.22, 0.94))
+	draw_colored_polygon([tip, pos + right * sz * 0.30, back, pos - right * sz * 0.30],
+		Color(0.72, 0.55, 0.30, 0.55))
+
+	# Drill arms (forward protruding)
+	var drill_off := sz * 0.55
+	for side in [-1, 1]:
+		var arm_base: Vector2 = pos + right * float(side) * drill_off + fwd * sz * 0.10
+		var arm_tip:  Vector2 = arm_base + fwd * sz * 0.85
+		draw_line(arm_base, arm_tip, Color(0.72, 0.60, 0.35, 0.80), 3.0)
+		# Drill tip
+		draw_circle(arm_tip, sz * 0.14, Color(0.95, 0.75, 0.25, 0.92))
+		draw_circle(arm_tip, sz * 0.07, Color(1.0, 0.95, 0.65, 0.95))
+
+	var cock := pos + fwd * sz * 0.40
+	draw_circle(cock, sz * 0.22, Color(1.0, 0.88, 0.55, 0.85))
+	draw_circle(cock, sz * 0.12, Color(1.0, 1.0,  0.85, 0.92))
+	draw_circle(wl, 2.2, Color(1.0, 0.65, 0.10, 0.88))
+	draw_circle(wr, 2.2, Color(1.0, 0.65, 0.10, 0.88))
+
+# ── Flagship ──────────────────────────────────────────────────────────────────
+func _draw_ship_flagship(pos: Vector2, fwd: Vector2, right: Vector2, sz: float) -> void:
+	# Massive multi-section capital ship
+	var back  := pos - fwd * sz * 0.80
+	var tip   := pos + fwd * sz * 1.20
+	var wl    := pos - fwd * sz * 0.10 + right * sz * 1.50
+	var wr    := pos - fwd * sz * 0.10 - right * sz * 1.50
+	var tl    := back + right * sz * 0.55
+	var tr    := back - right * sz * 0.55
+
+	# Triple engine bank
+	_draw_engine(back,                    fwd, sz * 0.52, Color(0.70, 0.55, 1.0))
+	_draw_engine(back + right * sz * 0.65, fwd, sz * 0.38, Color(0.60, 0.45, 0.90))
+	_draw_engine(back - right * sz * 0.65, fwd, sz * 0.38, Color(0.60, 0.45, 0.90))
+
+	# Main hull body
+	draw_colored_polygon([tip, wl, tl, back, tr, wr], Color(0.28, 0.24, 0.42, 0.96))
+	# Gold spine
+	draw_colored_polygon([tip, pos + right * sz * 0.20, back, pos - right * sz * 0.20],
+		Color(0.85, 0.72, 0.28, 0.70))
+	# Wing highlights
+	draw_line(tip, wl, Color(0.72, 0.60, 1.0, 0.50), 2.0)
+	draw_line(tip, wr, Color(0.72, 0.60, 1.0, 0.50), 2.0)
+	draw_line(wl, tl,  Color(0.72, 0.60, 1.0, 0.30), 1.5)
+	draw_line(wr, tr,  Color(0.72, 0.60, 1.0, 0.30), 1.5)
+
+	# Secondary weapons
+	for side in [-1, 1]:
+		var turret: Vector2 = pos + right * float(side) * sz * 0.75 + fwd * sz * 0.35
+		draw_circle(turret, sz * 0.18, Color(0.55, 0.45, 0.75, 0.85))
+		draw_line(turret, turret + fwd * sz * 0.42, Color(0.75, 0.65, 1.0, 0.72), 2.0)
+
+	# Bridge / Cockpit — large command module
+	var cock := pos + fwd * sz * 0.58
+	draw_circle(cock, sz * 0.30, Color(0.72, 0.62, 1.0, 0.88))
+	draw_circle(cock, sz * 0.18, Color(0.90, 0.82, 1.0, 0.90))
+	draw_circle(cock, sz * 0.09, Color(1.0,  1.0,  1.0, 0.96))
+
+	# Running lights — gold on wings
+	draw_circle(wl, 3.0, Color(1.0, 0.90, 0.30, 0.92))
+	draw_circle(wr, 3.0, Color(1.0, 0.90, 0.30, 0.92))
+	draw_circle(tl, 2.2, Color(0.80, 0.60, 1.0, 0.82))
+	draw_circle(tr, 2.2, Color(0.80, 0.60, 1.0, 0.82))

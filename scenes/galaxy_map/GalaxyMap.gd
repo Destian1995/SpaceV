@@ -48,6 +48,11 @@ var bg_stars:     Array = []
 var nebulae:      Array = []
 var time_e:       float = 0.0
 
+# Camera pan
+var cam_pan:      Vector2 = Vector2.ZERO
+var _dragging:    bool    = false
+var _drag_from:   Vector2 = Vector2.ZERO
+
 @onready var info_panel   = $UI/InfoPanel
 @onready var lbl_name     = $UI/InfoPanel/VBox/SystemName
 @onready var lbl_faction  = $UI/InfoPanel/VBox/Faction
@@ -137,8 +142,8 @@ func _draw() -> void:
 
 	# Connection lines with glow
 	for c in CONNECTIONS:
-		var a: Vector2 = SYSTEMS[c[0]]["pos"]
-		var b: Vector2 = SYSTEMS[c[1]]["pos"]
+		var a: Vector2 = SYSTEMS[c[0]]["pos"] + cam_pan
+		var b: Vector2 = SYSTEMS[c[1]]["pos"] + cam_pan
 		# Check if either end is current
 		var is_active: bool = c[0] == current_idx or c[1] == current_idx
 		var alpha: float = 0.55 if is_active else 0.28
@@ -149,11 +154,11 @@ func _draw() -> void:
 
 	# Systems
 	for i in SYSTEMS.size():
-		_draw_system(i)
+		_draw_system(i, cam_pan)
 
-func _draw_system(i: int) -> void:
+func _draw_system(i: int, offset: Vector2 = Vector2.ZERO) -> void:
 	var s    = SYSTEMS[i]
-	var pos: Vector2 = s["pos"]
+	var pos: Vector2 = s["pos"] + offset
 	var col: Color   = s["color"]
 	var sz:  float   = s["size"]
 	var is_current  := (i == current_idx)
@@ -165,9 +170,13 @@ func _draw_system(i: int) -> void:
 		var d_pulse: float = 0.06 + sin(time_e * 1.8 + i) * 0.03
 		draw_circle(pos, sz + 22, Color(1.0, 0.2, 0.2, d_pulse))
 
-	# System glow layers
-	draw_circle(pos, sz + 18, Color(col.r, col.g, col.b, 0.07))
-	draw_circle(pos, sz + 10, Color(col.r, col.g, col.b, 0.14))
+	# System glow — smooth gradient (10 layers, quadratic alpha falloff)
+	for gi in 10:
+		var t: float  = float(gi) / 9.0        # 0=outer 1=inner
+		var tt: float = t * t
+		var gr: float = sz + 28.0 * (1.0 - tt)
+		var ga: float = 0.012 * (1.0 - t) * (1.0 - t)
+		draw_circle(pos, gr, Color(col.r, col.g, col.b, ga))
 
 	# Current position: animated ring
 	if is_current:
@@ -186,11 +195,13 @@ func _draw_system(i: int) -> void:
 			var p1: Vector2 = pos + Vector2(cos(ta), sin(ta)) * (sz + 18)
 			draw_line(p0, p1, Color(1.0, 1.0, 0.3, 0.9), 2.0)
 
-	# Star body — layered circles
-	draw_circle(pos, sz, Color(col.r*0.4, col.g*0.4, col.b*0.5, 0.9))  # dark core bg
-	draw_circle(pos, sz * 0.85, col)
-	draw_circle(pos, sz * 0.5,  Color(min(col.r+0.35,1.0), min(col.g+0.35,1.0), min(col.b+0.25,1.0), 0.7))
-	draw_circle(pos, sz * 0.22, Color(1.0, 1.0, 1.0, 0.85))  # bright core
+	# Star body — smooth 6-layer gradient from dark edge to bright core
+	draw_circle(pos, sz,        Color(col.r * 0.35, col.g * 0.35, col.b * 0.45, 0.88))
+	draw_circle(pos, sz * 0.88, col)
+	draw_circle(pos, sz * 0.70, Color(minf(col.r+0.18,1.0), minf(col.g+0.18,1.0), minf(col.b+0.12,1.0), 0.80))
+	draw_circle(pos, sz * 0.50, Color(minf(col.r+0.30,1.0), minf(col.g+0.30,1.0), minf(col.b+0.22,1.0), 0.72))
+	draw_circle(pos, sz * 0.30, Color(minf(col.r+0.42,1.0), minf(col.g+0.42,1.0), minf(col.b+0.32,1.0), 0.82))
+	draw_circle(pos, sz * 0.16, Color(1.0, 1.0, 1.0, 0.92))  # bright core
 
 	# YOU ARE HERE marker
 	if is_current:
@@ -210,14 +221,25 @@ func _draw_system(i: int) -> void:
 		Color(col.r*0.5+0.2, col.g*0.5+0.2, col.b*0.4+0.3, 0.65))
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		var mp := get_global_mouse_position()
-		for i in SYSTEMS.size():
-			if mp.distance_to(SYSTEMS[i]["pos"]) < float(SYSTEMS[i]["size"]) + 14:
-				_on_system_clicked(i)
-				return
-		info_panel.hide()
-		selected_idx = -1
+		if event.pressed:
+			# Check if clicking a system
+			for i in SYSTEMS.size():
+				if mp.distance_to(SYSTEMS[i]["pos"] + cam_pan) < float(SYSTEMS[i]["size"]) + 14:
+					_on_system_clicked(i)
+					return
+			# Start drag
+			_dragging = true
+			_drag_from = mp
+			info_panel.hide()
+			selected_idx = -1
+		else:
+			_dragging = false
+
+	if event is InputEventMouseMotion and _dragging:
+		cam_pan += event.relative
+		queue_redraw()
 
 func _on_system_clicked(idx: int) -> void:
 	selected_idx = idx

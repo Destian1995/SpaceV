@@ -12,6 +12,9 @@ var _weapons_list: VBoxContainer
 var _ships_list:   VBoxContainer
 var _quests_list:  VBoxContainer
 var _bar_list:     VBoxContainer
+var _bank_list:    VBoxContainer
+var _repair_list:    VBoxContainer
+var _upgrades_list:  VBoxContainer
 
 func _ready() -> void:
 	layer = 10
@@ -66,11 +69,14 @@ func _build_ui() -> void:
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root_vbox.add_child(tabs)
 
-	_bar_list     = _make_scroll_tab(tabs, "🍺 Бар")
-	_trade_list   = _make_scroll_tab(tabs, "💰 Торговля")
-	_weapons_list = _make_scroll_tab(tabs, "⚔ Оружие")
-	_ships_list   = _make_scroll_tab(tabs, "🚀 Корабли")
-	_quests_list  = _make_scroll_tab(tabs, "📋 Задания")
+	_bar_list      = _make_scroll_tab(tabs, "🍺 Бар")
+	_trade_list    = _make_scroll_tab(tabs, "💰 Торговля")
+	_weapons_list  = _make_scroll_tab(tabs, "⚔ Оружие")
+	_ships_list    = _make_scroll_tab(tabs, "🚀 Корабли")
+	_quests_list   = _make_scroll_tab(tabs, "📋 Задания")
+	_bank_list     = _make_scroll_tab(tabs, "🏦 Банк")
+	_repair_list   = _make_scroll_tab(tabs, "🔧 Ремонт")
+	_upgrades_list = _make_scroll_tab(tabs, "🔬 Улучшения")
 
 func _make_scroll_tab(tabs: TabContainer, tab_name: String) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
@@ -93,6 +99,9 @@ func open_spaceport(planet: Dictionary) -> void:
 	_populate_weapons()
 	_populate_ships()
 	_populate_quests()
+	_populate_bank()
+	_populate_repair()
+	_populate_upgrades()
 	visible = true
 
 func _on_close() -> void:
@@ -176,31 +185,75 @@ func _sell_good(item_name: String, d: Dictionary) -> void:
 
 func _populate_weapons() -> void:
 	_clear(_weapons_list)
+	var ship    := GameManager.current_ship
+	var slots   := GameData.get_ship_weapon_slots(ship)
+	var allowed := GameData.get_ship_allowed_cats(ship)
+	var used    := GameManager.equipped_weapons.size()
+
+	# ── Slot header ────────────────────────────────────────────────────────
+	var slot_hb := HBoxContainer.new()
+	_weapons_list.add_child(slot_hb)
+
+	var slot_col := Color(0.3, 1.0, 0.5) if used < slots else Color(1.0, 0.4, 0.3)
+	slot_hb.add_child(_lbl("🔫 Слоты: %d / %d" % [used, slots], 17, slot_col))
+
+	var cat_ru := {"light": "лёгкое", "medium": "среднее", "heavy": "тяжёлое"}
+	var allowed_str := "  |  Разрешено: " + ", ".join(allowed.map(func(c): return cat_ru.get(c, c)))
+	slot_hb.add_child(_lbl(allowed_str, 13, Color(0.55, 0.75, 1.0)))
+
+	# ── Installed weapons ───────────────────────────────────────────────────
+	if not GameManager.equipped_weapons.is_empty():
+		_weapons_list.add_child(_lbl("— Установлено —", 13, Color(0.5, 0.5, 0.5)))
+		for wname in GameManager.equipped_weapons.duplicate():
+			var row := HBoxContainer.new()
+			row.add_child(_lbl("✅ " + wname, 15))
+			var rm := Button.new()
+			rm.text = "Снять"
+			rm.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
+			rm.pressed.connect(_remove_weapon.bind(wname))
+			row.add_child(rm)
+			_weapons_list.add_child(row)
+		_weapons_list.add_child(HSeparator.new())
+
+	# ── Shop ───────────────────────────────────────────────────────────────
 	var available: Array = current_planet.get("weapons", GameData.WEAPONS)
 	if available.is_empty():
 		_weapons_list.add_child(_lbl("Оружия нет в продаже", 16))
 		return
+
+	_weapons_list.add_child(_lbl("— В продаже —", 13, Color(0.5, 0.5, 0.5)))
+
+	var cat_icon := {"light": "🔹", "medium": "🔶", "heavy": "🔴"}
 	for w in available:
-		var owned: bool = w["name"] in GameManager.equipped_weapons
+		var owned:    bool   = w["name"] in GameManager.equipped_weapons
+		var cat:      String = GameData.WEAPON_CATEGORY.get(w["name"], "medium")
+		var err:      String = GameData.can_equip_weapon(ship, w, GameManager.equipped_weapons)
+		var cat_label: String = cat_icon.get(cat, "◆") + " " + cat_ru.get(cat, cat)
+
 		var card := _make_item_card(
 			w["name"],
-			w["desc"],
+			w["desc"] + "   " + cat_label,
 			"Урон: %d  |  Тип: %s" % [w["damage"], w["type"]],
 			w["price"],
-			"✅ Установлено" if owned else "Купить",
-			owned,
+			"✅ Установлено" if owned else ("🔒 " + err if err != "" else "Купить"),
+			owned or err != "",
 			func(): _buy_weapon(w)
 		)
 		_weapons_list.add_child(card)
 
 func _buy_weapon(w: Dictionary) -> void:
-	if w["name"] in GameManager.equipped_weapons:
+	var err := GameData.can_equip_weapon(GameManager.current_ship, w, GameManager.equipped_weapons)
+	if err != "" or w["name"] in GameManager.equipped_weapons:
 		return
 	if GameManager.spend_credits(w["price"]):
 		GameManager.equipped_weapons.append(w["name"])
 		_populate_weapons()
 		_refresh_credits()
-		print("[Spaceport] Weapon purchased: %s" % w["name"])
+
+func _remove_weapon(wname: String) -> void:
+	GameManager.equipped_weapons.erase(wname)
+	_populate_weapons()
+	_refresh_credits()
 
 # ── Ships ────────────────────────────────────────────────────────────────────
 
@@ -229,7 +282,10 @@ func _buy_ship(s: Dictionary) -> void:
 	if GameManager.spend_credits(s["price"]):
 		GameManager.current_ship = s.duplicate()
 		GameManager.cargo_capacity = s["cargo"]
+		GameManager.ship_upgrades.clear()   # улучшения привязаны к кораблю
+		GameManager.ship_hull_pct = 1.0     # новый корабль — целый корпус
 		_populate_ships()
+		_populate_upgrades()
 		_refresh_credits()
 		print("[Spaceport] Ship purchased: %s" % s["name"])
 
@@ -482,7 +538,7 @@ func _make_quest_card(q: Dictionary) -> PanelContainer:
 	if q.get("is_local", false):
 		dest_text = "📍 Сдать задание: прямо здесь, в баре"
 	else:
-		dest_text = "📍 Сдать задание: %s / %s" % [q.get("dest_galaxy","?"), q.get("dest_planet","?")]
+		dest_text = "📍 Сдать задание: система «%s» (любой космопорт)" % q.get("dest_galaxy", "?")
 	var dest_l := _lbl(dest_text, 13, Color(0.4, 0.85, 0.55))
 	info.add_child(dest_l)
 
@@ -508,6 +564,356 @@ func _accept_quest(q: Dictionary) -> void:
 	print("[Spaceport] Quest accepted: %s" % q["title"])
 	_populate_quests()
 	_refresh_credits()
+
+# ── Bank ─────────────────────────────────────────────────────────────────────
+
+func _populate_bank() -> void:
+	_clear(_bank_list)
+
+	# Header
+	var hdr := _lbl("🏦  ГАЛАКТИЧЕСКИЙ БАНК", 22, Color(0.9, 0.78, 0.2))
+	_bank_list.add_child(hdr)
+	_bank_list.add_child(_lbl("Надёжное хранение кредитов и финансовые услуги во всех системах.", 13, Color(0.6, 0.6, 0.6)))
+	_bank_list.add_child(HSeparator.new())
+
+	# Balance info
+	var info_hb := HBoxContainer.new()
+	_bank_list.add_child(info_hb)
+
+	var bal_vb := VBoxContainer.new()
+	bal_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info_hb.add_child(bal_vb)
+	bal_vb.add_child(_lbl("💳 На счёте:", 14, Color(0.5, 0.8, 1.0)))
+	bal_vb.add_child(_lbl("%d кред." % GameManager.bank_balance, 24, Color(0.3, 1.0, 0.55)))
+
+	var cred_vb := VBoxContainer.new()
+	cred_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info_hb.add_child(cred_vb)
+	cred_vb.add_child(_lbl("💰 Наличные:", 14, Color(0.5, 0.8, 1.0)))
+	cred_vb.add_child(_lbl("%d кред." % GameManager.credits, 24, Color(1.0, 0.88, 0.3)))
+
+	if GameManager.loan_amount > 0:
+		var loan_vb := VBoxContainer.new()
+		loan_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		info_hb.add_child(loan_vb)
+		loan_vb.add_child(_lbl("📋 Долг:", 14, Color(1.0, 0.4, 0.3)))
+		loan_vb.add_child(_lbl("%d кред." % GameManager.loan_amount, 24, Color(1.0, 0.3, 0.2)))
+
+	_bank_list.add_child(HSeparator.new())
+
+	# ── Deposit ──
+	var dep_hdr := HBoxContainer.new()
+	_bank_list.add_child(dep_hdr)
+	dep_hdr.add_child(_lbl("ДЕПОЗИТ", 15, Color(0.4, 0.9, 0.5)))
+	# Interest info
+	var int_lbl := _lbl(
+		"   📈 Вклад от %d к. → +4%% в день" % GameManager.BANK_MIN_FOR_INTEREST,
+		13, Color(0.9, 0.82, 0.3))
+	dep_hdr.add_child(int_lbl)
+	if GameManager.bank_balance >= GameManager.BANK_MIN_FOR_INTEREST:
+		var next_int := int(GameManager.bank_balance * GameManager.BANK_DEPOSIT_RATE)
+		var gain_lbl := _lbl("  ✅ Следующее начисление: +%d к." % next_int, 13, Color(0.3, 1.0, 0.55))
+		dep_hdr.add_child(gain_lbl)
+	elif GameManager.bank_balance > 0:
+		var need := GameManager.BANK_MIN_FOR_INTEREST - GameManager.bank_balance
+		var need_lbl := _lbl("  ⚠ До минимума: %d к." % need, 13, Color(0.9, 0.6, 0.3))
+		dep_hdr.add_child(need_lbl)
+
+	var dep_row := HBoxContainer.new()
+	_bank_list.add_child(dep_row)
+	dep_row.add_child(_lbl("Положить на счёт:", 14))
+	for amt in [500, 1000, 5000, 10000, 25000]:
+		var b := Button.new()
+		b.text = "%d к." % amt
+		b.disabled = GameManager.credits < amt
+		b.pressed.connect(func(): _bank_do_deposit(amt))
+		dep_row.add_child(b)
+
+	# ── Withdraw ──
+	_bank_list.add_child(HSeparator.new())
+	_bank_list.add_child(_lbl("СНЯТИЕ", 15, Color(0.4, 0.9, 0.5)))
+	var wdr_row := HBoxContainer.new()
+	_bank_list.add_child(wdr_row)
+	wdr_row.add_child(_lbl("Снять со счёта:", 14))
+	for amt in [500, 1000, 5000, 10000]:
+		var b := Button.new()
+		b.text = "%d к." % amt
+		b.disabled = GameManager.bank_balance < amt
+		b.pressed.connect(func(): _bank_do_withdraw(amt))
+		wdr_row.add_child(b)
+
+	# ── Loan ──
+	_bank_list.add_child(HSeparator.new())
+	_bank_list.add_child(_lbl("КРЕДИТОВАНИЕ  (12% сверху, разовый займ)", 15, Color(1.0, 0.75, 0.2)))
+
+	if GameManager.loan_amount > 0:
+		var repay_row := HBoxContainer.new()
+		_bank_list.add_child(repay_row)
+		repay_row.add_child(_lbl("Погасить долг (%d кред.):" % GameManager.loan_amount, 14))
+		for amt in [500, 1000, 5000]:
+			if amt > GameManager.loan_amount:
+				continue
+			var b := Button.new()
+			b.text = "%d к." % amt
+			b.disabled = GameManager.credits < amt
+			b.pressed.connect(func(): _bank_do_repay(amt))
+			repay_row.add_child(b)
+		var b_full := Button.new()
+		b_full.text = "Погасить полностью"
+		b_full.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+		b_full.disabled = GameManager.credits < GameManager.loan_amount
+		b_full.pressed.connect(func(): _bank_do_repay(GameManager.loan_amount))
+		repay_row.add_child(b_full)
+	else:
+		var loan_row := HBoxContainer.new()
+		_bank_list.add_child(loan_row)
+		loan_row.add_child(_lbl("Взять займ:", 14))
+		for amt in [1000, 5000, 10000, 25000]:
+			var b := Button.new()
+			b.text = "%d к." % amt
+			b.pressed.connect(func(): _bank_do_loan(amt))
+			loan_row.add_child(b)
+
+	# ── Info ──
+	_bank_list.add_child(HSeparator.new())
+	_bank_list.add_child(_lbl(
+		"ℹ  Счёт доступен в любом космопорту. Депозит от %d к. приносит 4%% в день (начисляется при смене дня/прыжке). Кредит: +12%% разово." % GameManager.BANK_MIN_FOR_INTEREST,
+		12, Color(0.45, 0.45, 0.45)))
+
+func _bank_do_deposit(amt: int) -> void:
+	if GameManager.bank_deposit(amt):
+		_populate_bank()
+		_refresh_credits()
+
+func _bank_do_withdraw(amt: int) -> void:
+	if GameManager.bank_withdraw(amt):
+		_populate_bank()
+		_refresh_credits()
+
+func _bank_do_loan(amt: int) -> void:
+	if GameManager.bank_take_loan(amt):
+		_populate_bank()
+		_refresh_credits()
+
+func _bank_do_repay(amt: int) -> void:
+	if GameManager.bank_repay_loan(amt):
+		_populate_bank()
+		_refresh_credits()
+
+# ── Repair ───────────────────────────────────────────────────────────────────
+
+func _populate_repair() -> void:
+	_clear(_repair_list)
+
+	var ship      := GameManager.current_ship
+	var hull_pct  := clampf(GameManager.ship_hull_pct, 0.0, 1.0)
+	var max_hull: int = ship.get("hull", 100)
+	var cur_hull: int = maxi(1, int(hull_pct * float(max_hull)))
+	var missing   := max_hull - cur_hull
+	var ship_price: int = ship.get("price", 10000)
+
+	# Header
+	_repair_list.add_child(_lbl("🔧  РЕМОНТНЫЙ ДОК", 22, Color(0.85, 0.68, 0.25)))
+	_repair_list.add_child(HSeparator.new())
+
+	# Ship condition block
+	var cond_hb := HBoxContainer.new()
+	_repair_list.add_child(cond_hb)
+
+	var info_vb := VBoxContainer.new()
+	info_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cond_hb.add_child(info_vb)
+
+	info_vb.add_child(_lbl("Корабль: %s" % ship.get("name", "?"), 17))
+	var hull_col := Color(0.2, 0.85, 0.3) if hull_pct > 0.6 else \
+				   (Color(0.9, 0.72, 0.1) if hull_pct > 0.3 else Color(0.95, 0.2, 0.2))
+	info_vb.add_child(_lbl("Корпус: %d / %d  (%.0f%%)" % [cur_hull, max_hull, hull_pct * 100],
+		18, hull_col))
+
+	# Condition label
+	var cond_txt := "🟢 Отличное состояние"
+	if hull_pct < 0.3:  cond_txt = "🔴 Критические повреждения — срочный ремонт!"
+	elif hull_pct < 0.6: cond_txt = "🟡 Значительные повреждения"
+	elif hull_pct < 0.9: cond_txt = "🟠 Незначительные повреждения"
+	info_vb.add_child(_lbl(cond_txt, 14))
+
+	_repair_list.add_child(HSeparator.new())
+
+	# Cost formula explanation
+	# Full repair = 5% of ship price
+	# Cost per 1 HP = ship_price * 0.05 / max_hull
+	var cost_per_hp: float = float(ship_price) * 0.05 / float(max_hull)
+	_repair_list.add_child(_lbl(
+		"💡 Тариф: %.1f кред. за 1 ед. корпуса  (полный ремонт = 5%% стоимости корабля)" % cost_per_hp,
+		13, Color(0.5, 0.6, 0.7)))
+	_repair_list.add_child(HSeparator.new())
+
+	if missing <= 0:
+		_repair_list.add_child(_lbl("✅  Корабль в полном порядке — ремонт не требуется.", 16, Color(0.3, 1.0, 0.5)))
+		return
+
+	# Repair options
+	_repair_list.add_child(_lbl("ВАРИАНТЫ РЕМОНТА", 15, Color(0.5, 0.8, 1.0)))
+
+	var options := []
+	# 25%, 50%, 75%, 100% of missing hull
+	for pct_i in [25, 50, 75, 100]:
+		var hp_to_fix: int = maxi(1, int(float(missing) * float(pct_i) / 100.0))
+		var cost:      int = maxi(1, int(float(hp_to_fix) * cost_per_hp))
+		options.append({"label": "%d%%  (+%d HP)" % [pct_i, hp_to_fix], "hp": hp_to_fix, "cost": cost})
+
+	for opt in options:
+		var row := HBoxContainer.new()
+		_repair_list.add_child(row)
+
+		var desc_lbl := _lbl(opt["label"], 15)
+		desc_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(desc_lbl)
+
+		var cost_lbl := _lbl("%d кред." % opt["cost"], 15, Color(1.0, 0.88, 0.3))
+		cost_lbl.custom_minimum_size = Vector2(120, 0)
+		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(cost_lbl)
+
+		var btn := Button.new()
+		btn.text = "Починить"
+		btn.custom_minimum_size = Vector2(120, 0)
+		btn.disabled = GameManager.credits < opt["cost"]
+		var hp_cap: int = opt["hp"]
+		var cost_cap: int = opt["cost"]
+		btn.pressed.connect(func(): _do_repair(hp_cap, cost_cap))
+		row.add_child(btn)
+
+	_repair_list.add_child(HSeparator.new())
+	_repair_list.add_child(_lbl(
+		"ℹ  Ремонт производится немедленно. Щиты восстанавливаются автоматически перед следующим боем.",
+		12, Color(0.4, 0.4, 0.45)))
+
+func _do_repair(hp_amount: int, cost: int) -> void:
+	if not GameManager.spend_credits(cost):
+		return
+	var max_hull: int = GameManager.current_ship.get("hull", 100)
+	var cur_hull: int = maxi(1, int(clampf(GameManager.ship_hull_pct, 0.0, 1.0) * float(max_hull)))
+	var new_hull: int = mini(cur_hull + hp_amount, max_hull)
+	GameManager.ship_hull_pct = float(new_hull) / float(max_hull)
+	_populate_repair()
+	_refresh_credits()
+
+# ── Upgrades ─────────────────────────────────────────────────────────────────
+
+const UPGRADES_DATA := [
+	{
+		"id": "volley", "name": "Синхронный залп", "icon": "⚡",
+		"desc": "Все орудия стреляют одновременно по одной цели за счёт энергии щита.",
+		"detail": "Клавиша: Q  |  Расход: 30 щита  |  Перезарядка: 8 сек",
+		"price": 8000,
+	},
+	{
+		"id": "emergency_shields", "name": "Аварийные щиты", "icon": "🛡",
+		"desc": "Генератор конвертирует 10% текущего корпуса в щитовую энергию.",
+		"detail": "Клавиша: W  |  Расход: 10% корпуса  |  Перезарядка: 12 сек",
+		"price": 6500,
+	},
+	{
+		"id": "boost", "name": "Форсаж двигателя", "icon": "🔥",
+		"desc": "Кратковременный форсаж: скорость ×2.5 на 5 секунд.",
+		"detail": "Клавиша: R  |  Расход: 25 щита  |  Перезарядка: 15 сек",
+		"price": 7500,
+	},
+	{
+		"id": "overload", "name": "Перегрузка орудий", "icon": "💥",
+		"desc": "Следующий выстрел наносит утроенный урон, перегревая орудия.",
+		"detail": "Клавиша: F  |  Расход: 25 щита  |  Перезарядка: 10 сек",
+		"price": 9000,
+	},
+	{
+		"id": "repair_drones", "name": "Ремонтные дроны", "icon": "🤖",
+		"desc": "Нанодроны непрерывно восстанавливают корпус во время боя (+2 HP/сек).",
+		"detail": "Пассивное улучшение  |  Эффект всегда активен в бою",
+		"price": 12000,
+	},
+	{
+		"id": "shield_injector", "name": "Щитовой инжектор", "icon": "💉",
+		"desc": "Экстренный впрыск плазмы: мгновенно восстанавливает щиты до 50% ценой корпуса.",
+		"detail": "Клавиша: X  |  Расход: 10% корпуса  |  Перезарядка: 18 сек",
+		"price": 10000,
+	},
+]
+
+func _populate_upgrades() -> void:
+	_clear(_upgrades_list)
+	_upgrades_list.add_child(_lbl("🔬  УЛУЧШЕНИЯ КОРАБЛЯ", 22, Color(0.55, 0.85, 1.0)))
+	_upgrades_list.add_child(_lbl(
+		"Активные улучшения запускаются кнопкой в бою. Защитные — автоматически. Привязаны к кораблю.",
+		13, Color(0.5, 0.55, 0.65)))
+	_upgrades_list.add_child(HSeparator.new())
+
+	for upg in UPGRADES_DATA:
+		var owned: bool = upg["id"] in GameManager.ship_upgrades
+
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(0, 88)
+		var hb := HBoxContainer.new()
+		card.add_child(hb)
+
+		# Icon
+		var icon_l := _lbl(upg["icon"], 34)
+		icon_l.custom_minimum_size = Vector2(56, 0)
+		icon_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hb.add_child(icon_l)
+
+		# Info
+		var info_vb := VBoxContainer.new()
+		info_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb.add_child(info_vb)
+
+		var name_row := HBoxContainer.new()
+		info_vb.add_child(name_row)
+		name_row.add_child(_lbl(upg["name"], 18))
+		if owned:
+			name_row.add_child(_lbl("  ✅ Установлено", 13, Color(0.3, 1.0, 0.5)))
+
+		var desc_l := _lbl(upg["desc"], 13, Color(0.68, 0.68, 0.68))
+		desc_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		info_vb.add_child(desc_l)
+
+		info_vb.add_child(_lbl(upg["detail"], 12, Color(0.45, 0.75, 1.0)))
+
+		# Buy column
+		var buy_vb := VBoxContainer.new()
+		buy_vb.custom_minimum_size = Vector2(160, 0)
+		hb.add_child(buy_vb)
+
+		var price_l := _lbl("%d кред." % upg["price"], 16, Color(1.0, 0.88, 0.3))
+		price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		buy_vb.add_child(price_l)
+
+		var btn := Button.new()
+		if owned:
+			btn.text = "✅ Установлено"
+			btn.disabled = true
+		elif GameManager.credits < upg["price"]:
+			btn.text = "Недостаточно кредитов"
+			btn.disabled = true
+		else:
+			btn.text = "Установить"
+			btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var uid: String = upg["id"]
+		var uprice: int = upg["price"]
+		btn.pressed.connect(func(): _buy_upgrade(uid, uprice))
+		buy_vb.add_child(btn)
+
+		_upgrades_list.add_child(card)
+
+func _buy_upgrade(uid: String, price: int) -> void:
+	if uid in GameManager.ship_upgrades:
+		return
+	if GameManager.spend_credits(price):
+		GameManager.ship_upgrades.append(uid)
+		_populate_upgrades()
+		_refresh_credits()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -76,6 +76,76 @@ const WEAPONS := [
 	 "desc": "Дешёвое и быстрострельное оружие начального уровня."},
 ]
 
+# ── Weapon categories ────────────────────────────────────────────────────────
+const WEAPON_CATEGORY := {
+	"Импульсный бластер": "light",
+	"ЭМИ дизраптор":     "light",
+	"Лазерная пушка":    "medium",
+	"Ракетный launcher": "medium",
+	"Плазменная турель": "heavy",
+	"Рельсотрон":        "heavy",
+}
+
+# ship_type → ship_class → {slots, cats}
+const SHIP_WEAPON_RULES := {
+	"Исследовательский": {
+		"C": {"slots": 1, "cats": ["light"]},
+		"B": {"slots": 2, "cats": ["light", "medium"]},
+		"A": {"slots": 3, "cats": ["light", "medium"]},
+	},
+	"Грузовой": {
+		"C": {"slots": 1, "cats": ["light", "medium"]},
+		"B": {"slots": 2, "cats": ["medium"]},
+		"A": {"slots": 2, "cats": ["medium"]},
+	},
+	"Боевой": {
+		"C": {"slots": 4, "cats": ["light", "medium", "heavy"]},
+		"B": {"slots": 5, "cats": ["light", "medium", "heavy"]},
+		"A": {"slots": 7, "cats": ["light", "medium", "heavy"]},
+	},
+	"Ресурсодобывающий": {
+		"C": {"slots": 1, "cats": ["light"]},
+		"B": {"slots": 2, "cats": ["light", "medium"]},
+		"A": {"slots": 3, "cats": ["light", "medium"]},
+	},
+	"Флагманский": {
+		"A": {"slots": 6, "cats": ["light", "medium", "heavy"]},
+	},
+}
+
+func get_ship_weapon_slots(ship: Dictionary) -> int:
+	var stype:  String = ship.get("ship_type",  "Исследовательский")
+	var sclass: String = ship.get("ship_class", "C")
+	if not SHIP_WEAPON_RULES.has(stype):
+		return 2
+	var tr: Dictionary = SHIP_WEAPON_RULES[stype]
+	if tr.has(sclass):
+		return tr[sclass]["slots"]
+	# fallback to first class available
+	return tr.values()[0]["slots"]
+
+func get_ship_allowed_cats(ship: Dictionary) -> Array:
+	var stype:  String = ship.get("ship_type",  "Исследовательский")
+	var sclass: String = ship.get("ship_class", "C")
+	if not SHIP_WEAPON_RULES.has(stype):
+		return ["light", "medium", "heavy"]
+	var tr: Dictionary = SHIP_WEAPON_RULES[stype]
+	if tr.has(sclass):
+		return tr[sclass]["cats"]
+	return tr.values()[0]["cats"]
+
+# Returns "" if OK, human-readable error if not
+func can_equip_weapon(ship: Dictionary, weapon: Dictionary, equipped: Array) -> String:
+	var slots := get_ship_weapon_slots(ship)
+	if equipped.size() >= slots:
+		return "Слоты заполнены (%d/%d)" % [equipped.size(), slots]
+	var allowed: Array = get_ship_allowed_cats(ship)
+	var cat: String = WEAPON_CATEGORY.get(weapon["name"], "medium")
+	if cat not in allowed:
+		var cat_ru := {"light": "лёгкое", "medium": "среднее", "heavy": "тяжёлое"}
+		return "%s оружие нельзя на %s" % [cat_ru.get(cat, cat), ship.get("ship_type", "?")]
+	return ""
+
 const QUEST_TYPES := [
 	{
 		"id": "cargo_delivery", "title": "Доставка груза",

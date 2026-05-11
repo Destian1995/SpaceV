@@ -68,9 +68,19 @@ func _build_ui() -> void:
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	right.add_child(tabs)
 
-	# Stats tab
+	# Status tab (current ship health)
+	var status_scroll := ScrollContainer.new()
+	status_scroll.name = "🔴 Системы"
+	status_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_child(status_scroll)
+	var stv := VBoxContainer.new()
+	stv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_scroll.add_child(stv)
+	_populate_status(stv)
+
+	# Stats tab (base characteristics)
 	var stats_scroll := ScrollContainer.new()
-	stats_scroll.name = "📊 Системы"
+	stats_scroll.name = "📊 Характеристики"
 	stats_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	tabs.add_child(stats_scroll)
 	var sv := VBoxContainer.new()
@@ -105,6 +115,161 @@ func _nav_btn(hb: HBoxContainer, text: String, cb: Callable) -> void:
 	btn.custom_minimum_size = Vector2(148, 0)
 	btn.pressed.connect(cb)
 	hb.add_child(btn)
+
+# ── Status panel (current damage) ────────────────────────────────────────────
+
+func _populate_status(vb: VBoxContainer) -> void:
+	var ship     := GameManager.current_ship
+	var hull_pct := clampf(GameManager.ship_hull_pct, 0.0, 1.0)
+
+	vb.add_child(_lbl("ИДЕНТИФИКАЦИЯ", 13, Color(0.4, 0.6, 0.9)))
+	vb.add_child(_lbl(ship.get("name", "???"), 22, Color(0.85, 0.90, 1.0)))
+	vb.add_child(_lbl("%s  •  Класс %s" % [ship.get("ship_type",""), ship.get("ship_class","C")],
+		15, Color(0.55, 0.65, 0.75)))
+	vb.add_child(HSeparator.new())
+
+	# Overall condition summary
+	var overall_txt: String
+	var overall_col: Color
+	if hull_pct >= 0.90:
+		overall_txt = "✅  Отличное — все системы в норме"
+		overall_col = Color(0.3, 1.0, 0.45)
+	elif hull_pct >= 0.65:
+		overall_txt = "🟡  Лёгкие повреждения — рекомендован осмотр"
+		overall_col = Color(0.95, 0.82, 0.20)
+	elif hull_pct >= 0.35:
+		overall_txt = "🟠  Значительные повреждения — требуется ремонт"
+		overall_col = Color(1.0, 0.55, 0.12)
+	else:
+		overall_txt = "🔴  Критическое состояние — срочный ремонт!"
+		overall_col = Color(1.0, 0.18, 0.18)
+	vb.add_child(_lbl(overall_txt, 15, overall_col))
+	vb.add_child(HSeparator.new())
+
+	# Each system has its own degradation curve based on hull_pct
+	# Systems degrade at different thresholds to simulate real damage spread
+	vb.add_child(_lbl("СОСТОЯНИЕ СИСТЕМ", 13, Color(0.4, 0.6, 0.9)))
+
+	var max_hull: int  = ship.get("hull", 100)
+	var cur_hull: int  = maxi(1, int(hull_pct * float(max_hull)))
+	_status_row(vb, "⚙  Корпус",
+		cur_hull, max_hull, hull_pct)
+
+	# Shields degrade slowly at first, then faster below 50%
+	var sh_pct := clampf(0.15 + hull_pct * 0.85, 0.0, 1.0) if hull_pct < 0.5 \
+		else clampf(0.5 + (hull_pct - 0.5) * 1.0, 0.0, 1.0)
+	var max_sh: int = ship.get("shields", 50)
+	_status_row(vb, "🔵  Щиты",
+		int(sh_pct * max_sh), max_sh, sh_pct)
+
+	# Engines: start degrading below 70%
+	var eng_pct := 1.0 if hull_pct >= 0.70 \
+		else clampf(0.30 + (hull_pct / 0.70) * 0.70, 0.0, 1.0)
+	var max_spd: int = ship.get("speed", 200)
+	_status_row(vb, "⚡  Двигатели",
+		int(eng_pct * max_spd), max_spd, eng_pct)
+
+	# Weapons: start degrading below 60%
+	var wpn_pct := 1.0 if hull_pct >= 0.60 \
+		else clampf(0.20 + (hull_pct / 0.60) * 0.80, 0.0, 1.0)
+	_status_row(vb, "🔫  Вооружение",
+		int(wpn_pct * 100), 100, wpn_pct)
+
+	# Sensors: degrade below 80%
+	var sen_pct := 1.0 if hull_pct >= 0.80 \
+		else clampf(0.40 + (hull_pct / 0.80) * 0.60, 0.0, 1.0)
+	var max_sen: int = ship.get("sensors", 50)
+	_status_row(vb, "📡  Сенсоры",
+		int(sen_pct * max_sen), max_sen, sen_pct)
+
+	# Life support: only affected at critical hull
+	var ls_pct := 1.0 if hull_pct >= 0.30 \
+		else clampf(hull_pct / 0.30, 0.0, 1.0)
+	_status_row(vb, "💨  Жизнеобеспечение",
+		int(ls_pct * 100), 100, ls_pct)
+
+	vb.add_child(HSeparator.new())
+
+	# Repair cost info
+	var ship_price: int = ship.get("price", 10000)
+	var missing_pct := 1.0 - hull_pct
+	var repair_cost := int(float(ship_price) * 0.05 * missing_pct)
+	if missing_pct > 0.01:
+		vb.add_child(_lbl("🔧  Стоимость полного ремонта: %d кред." % repair_cost,
+			14, Color(1.0, 0.75, 0.25)))
+		vb.add_child(_lbl("   (ремонт доступен в любом космопорту)", 12, Color(0.45, 0.45, 0.5)))
+	else:
+		vb.add_child(_lbl("🔧  Ремонт не требуется", 14, Color(0.3, 1.0, 0.45)))
+
+	vb.add_child(HSeparator.new())
+	vb.add_child(_lbl("УСТАНОВЛЕННЫЕ УЛУЧШЕНИЯ", 13, Color(0.4, 0.6, 0.9)))
+
+	const UPG_META := {
+		"volley":            ["⚡", "Синхронный залп",    "Все орудия одновременно  |  Актив: кнопка в бою",   Color(1.0, 0.85, 0.2)],
+		"emergency_shields": ["🛡", "Аварийные щиты",    "−10% корпус → +щиты  |  Авто: при потере щита",    Color(0.3, 0.7,  1.0)],
+		"boost":             ["🔥", "Форсаж двигателя",  "Скорость ×2.5 на 5 сек  |  Актив: кнопка в бою",   Color(1.0, 0.5,  0.1)],
+		"overload":          ["💥", "Перегрузка орудий", "Следующий выстрел ×3  |  Актив: кнопка в бою",      Color(1.0, 0.3,  0.9)],
+		"repair_drones":     ["🤖", "Ремонтные дроны",   "+2 HP/сек в бою  |  Пассивное — всегда активно",   Color(0.4, 1.0,  0.5)],
+		"shield_injector":   ["💉", "Щитовой инжектор",  "Щиты до 50%  |  Авто: при щитах < 20%",            Color(0.2, 1.0,  0.8)],
+	}
+
+	if GameManager.ship_upgrades.is_empty():
+		vb.add_child(_lbl("  Улучшений нет. Установите в космопорту (вкладка Улучшения).",
+			13, Color(0.45, 0.45, 0.5)))
+	else:
+		for uid: String in GameManager.ship_upgrades:
+			if not UPG_META.has(uid): continue
+			var meta: Array = UPG_META[uid]
+			var row := HBoxContainer.new()
+			vb.add_child(row)
+			var icon_l := _lbl(meta[0], 18)
+			icon_l.custom_minimum_size = Vector2(28, 0)
+			row.add_child(icon_l)
+			var info_vb := VBoxContainer.new()
+			info_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(info_vb)
+			info_vb.add_child(_lbl(meta[1], 14, meta[3]))
+			var detail_l := _lbl(meta[2], 11, Color(0.5, 0.6, 0.7))
+			detail_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			info_vb.add_child(detail_l)
+
+func _status_row(vb: VBoxContainer, label: String, cur: int, max_v: int, pct: float) -> void:
+	var row := HBoxContainer.new()
+	vb.add_child(row)
+
+	var lbl := _lbl(label, 14)
+	lbl.custom_minimum_size = Vector2(175, 0)
+	row.add_child(lbl)
+
+	# Colored progress bar
+	var bar := ProgressBar.new()
+	bar.max_value = 100
+	bar.value     = int(clampf(pct, 0.0, 1.0) * 100)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.custom_minimum_size   = Vector2(0, 20)
+	# Color modulation via StyleBox
+	if pct >= 0.75:
+		bar.modulate = Color(0.3, 1.0, 0.45)
+	elif pct >= 0.45:
+		bar.modulate = Color(1.0, 0.82, 0.2)
+	elif pct >= 0.20:
+		bar.modulate = Color(1.0, 0.45, 0.12)
+	else:
+		bar.modulate = Color(1.0, 0.15, 0.15)
+	row.add_child(bar)
+
+	var pct_col := Color(0.3, 1.0, 0.45) if pct >= 0.75 else \
+				  (Color(0.95, 0.82, 0.20) if pct >= 0.45 else \
+				  (Color(1.0, 0.50, 0.12) if pct >= 0.20 else Color(1.0, 0.2, 0.2)))
+	var val_lbl := _lbl("%d%%" % int(pct * 100), 14, pct_col)
+	val_lbl.custom_minimum_size = Vector2(42, 0)
+	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(val_lbl)
+
+	var num_lbl := _lbl("%d/%d" % [cur, max_v], 12, Color(0.45, 0.50, 0.58))
+	num_lbl.custom_minimum_size = Vector2(72, 0)
+	num_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(num_lbl)
 
 # ── Stats panel ───────────────────────────────────────────────────────────────
 

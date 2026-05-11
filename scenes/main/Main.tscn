@@ -1,6 +1,6 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=2 format=3 uid="uid://drohyy1ftq0hf"]
 
-[ext_resource type="Script" path="res://scenes/main/Main.gd" id="1"]
+[ext_resource type="Script" uid="uid://dqppexo5c3734" path="res://scenes/main/Main.gd" id="1"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
@@ -14,57 +14,66 @@ anchor_bottom = 1.0
 alignment = 1
 
 [node name="Spacer1" type="Control" parent="UI/VBox"]
-size_flags_vertical = 3
 custom_minimum_size = Vector2(0, 60)
+layout_mode = 2
+size_flags_vertical = 3
 
 [node name="Title" type="Label" parent="UI/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.82, 1, 1)
+theme_override_font_sizes/font_size = 82
 text = "S  P  A  C  E  V"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 82
-theme_override_colors/font_color = Color(0.55, 0.82, 1.0, 1.0)
 
 [node name="Subtitle" type="Label" parent="UI/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.58, 0.85, 0.85)
+theme_override_font_sizes/font_size = 20
 text = "SPACE CAPTAIN TACTICAL RPG"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 20
-theme_override_colors/font_color = Color(0.4, 0.58, 0.85, 0.85)
 
 [node name="TagLine" type="Label" parent="UI/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.45, 0.7, 0.7)
+theme_override_font_sizes/font_size = 14
 text = "— командуй кораблём. исследуй галактики. выживи. —"
 horizontal_alignment = 1
-theme_override_font_sizes/font_size = 14
-theme_override_colors/font_color = Color(0.3, 0.45, 0.7, 0.7)
 
 [node name="Spacer2" type="Control" parent="UI/VBox"]
 custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
 
 [node name="StartButton" type="Button" parent="UI/VBox"]
-text = "▶   НАЧАТЬ ИГРУ"
-theme_override_font_sizes/font_size = 26
 custom_minimum_size = Vector2(340, 64)
+layout_mode = 2
 size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 26
+text = "▶   НАЧАТЬ ИГРУ"
 
 [node name="Gap" type="Control" parent="UI/VBox"]
 custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
 
 [node name="QuitButton" type="Button" parent="UI/VBox"]
-text = "ВЫХОД"
-theme_override_font_sizes/font_size = 18
 custom_minimum_size = Vector2(200, 46)
+layout_mode = 2
 size_flags_horizontal = 4
 theme_override_colors/font_color = Color(0.6, 0.6, 0.7, 1)
+theme_override_font_sizes/font_size = 18
+text = "ВЫХОД"
 
 [node name="Spacer3" type="Control" parent="UI/VBox"]
+layout_mode = 2
 size_flags_vertical = 3
 
 [node name="Version" type="Label" parent="UI"]
-anchors_preset = 7
+anchors_preset = 12
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 14
-offset_top = -26
-offset_bottom = -4
-text = "v0.1.0 alpha  |  2026"
-theme_override_font_sizes/font_size = 13
+offset_left = 14.0
+offset_top = -26.0
+offset_bottom = -4.0
 theme_override_colors/font_color = Color(0.3, 0.35, 0.5, 0.7)
+theme_override_font_sizes/font_size = 13
+text = "v0.1.0 alpha  |  2026"
