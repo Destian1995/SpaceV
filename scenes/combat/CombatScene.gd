@@ -15,11 +15,15 @@ const ARENA_TOP          := 60.0
 
 # ── Weapon accuracy table ─────────────────────────────────────────────────────
 const WEAPON_STATS := {
-	"energy":  {"accuracy": 0.78, "cooldown": 0.42, "miss_spread": 0.52},
-	"missile": {"accuracy": 0.92, "cooldown": 1.50, "miss_spread": 0.22},
-	"plasma":  {"accuracy": 0.62, "cooldown": 0.75, "miss_spread": 0.70},
-	"kinetic": {"accuracy": 0.52, "cooldown": 2.00, "miss_spread": 0.90},
-	"emp":     {"accuracy": 0.82, "cooldown": 0.60, "miss_spread": 0.40},
+	"pulse":      {"accuracy": 0.74, "cooldown": 0.18, "miss_spread": 0.55},  # скорострел
+	"energy":     {"accuracy": 0.82, "cooldown": 0.40, "miss_spread": 0.48},  # лазер
+	"emp":        {"accuracy": 0.85, "cooldown": 0.52, "miss_spread": 0.38},  # электропушка
+	"turbolaser": {"accuracy": 0.80, "cooldown": 0.55, "miss_spread": 0.44},  # двойной залп
+	"plasma":     {"accuracy": 0.62, "cooldown": 0.78, "miss_spread": 0.70},  # веер x3
+	"torpedo":    {"accuracy": 0.96, "cooldown": 2.20, "miss_spread": 0.15},  # самонаведение, 5 шт
+	"missile":    {"accuracy": 0.92, "cooldown": 1.50, "miss_spread": 0.22},
+	"kinetic":    {"accuracy": 0.52, "cooldown": 2.00, "miss_spread": 0.90},
+	"railgun":    {"accuracy": 0.88, "cooldown": 3.80, "miss_spread": 0.28},  # сверхтяжёлое
 }
 
 # ── Variant definitions ───────────────────────────────────────────────────────
@@ -69,6 +73,21 @@ var time_e:      float   = 0.0
 var screen_shake: Vector2 = Vector2.ZERO
 var damage_flash: float   = 0.0
 var hit_stun:     float   = 0.0
+
+# ── Завершение боя и итоговая статистика ──────────────────────────────────────
+var ending_battle:   bool  = false  # враги мертвы — ждём конца анимации взрыва
+var ending_timer:    float = 0.0
+var _pending_defeat: bool  = false
+var _pending_earned: int   = 0
+var _damage_dealt:    int  = 0   # нанесено врагам
+var _damage_absorbed: int  = 0   # получено игроком
+var _ships_destroyed: int  = 0   # уничтожено кораблей
+
+# ── Пауза ──────────────────────────────────────────────────────────────────────
+var is_paused: bool = false
+
+# ── След двигателя ────────────────────────────────────────────────────────────
+var engine_trail: Array[Dictionary] = []
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 var _ui_layer:           CanvasLayer
@@ -215,10 +234,14 @@ func _init_combat() -> void:
 	for wname in GameManager.equipped_weapons:
 		for w in GameData.WEAPONS:
 			if w["name"] == wname:
-				player_weapons.append(w.duplicate())
+				var wd: Dictionary = w.duplicate()
+				# Инициализируем патроны для оружий с боезапасом
+				if wd.has("ammo"):
+					wd["ammo_left"] = wd["ammo"]
+				player_weapons.append(wd)
 				break
 	if player_weapons.is_empty():
-		player_weapons.append({"name": "Импульсный бластер", "damage": 18, "type": "energy"})
+		player_weapons.append({"name": "Импульсное орудие", "damage": 25, "type": "pulse"})
 	weapon_cooldowns.clear()
 	for w in player_weapons:
 		weapon_cooldowns[w["name"]] = 0.0
@@ -269,7 +292,21 @@ func _build_ui() -> void:
 	else:
 		threat_txt = "%d вражеских корабля" % enemy_count if enemy_count < 5 \
 			else "%d вражеских кораблей" % enemy_count
-	_status_lbl.text = "⚔  %s  |  ЛКМ — точка движения  |  E — отступить" % threat_txt
+	_status_lbl.text = "⚔  %s  |  ЛКМ — движение  |  E — отступить  |  ПРОБЕЛ — пауза" % threat_txt
+
+	# Метка паузы
+	var pause_lbl := Label.new()
+	pause_lbl.name = "PauseLbl"
+	pause_lbl.set_anchors_preset(Control.PRESET_CENTER)
+	pause_lbl.offset_left   = -160; pause_lbl.offset_right  = 160
+	pause_lbl.offset_top    = -40;  pause_lbl.offset_bottom = 40
+	pause_lbl.text          = "⏸  ПАУЗА"
+	pause_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pause_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	pause_lbl.add_theme_font_size_override("font_size", 38)
+	pause_lbl.add_theme_color_override("font_color", Color(0.9, 0.95, 1.0, 0.92))
+	pause_lbl.visible = false
+	_ui_layer.add_child(pause_lbl)
 
 	# Weapons and retreat are drawn in _draw_hud and clicked via _input (no Button nodes)
 
@@ -316,6 +353,11 @@ func _input(event: InputEvent) -> void:
 		if ke.pressed and not ke.echo:
 			match ke.keycode:
 				KEY_E: _try_retreat()
+				KEY_SPACE:
+					if not finished and not ending_battle:
+						is_paused = not is_paused
+						var pl := _ui_layer.get_node_or_null("PauseLbl")
+						if pl: pl.visible = is_paused
 				KEY_1: selected_weapon_idx = 0
 				KEY_2: selected_weapon_idx = mini(1, player_weapons.size() - 1)
 				KEY_3: selected_weapon_idx = mini(2, player_weapons.size() - 1)
@@ -328,6 +370,20 @@ func _input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if finished: return
 	time_e += delta
+
+	# Бой завершён — ждём окончания анимации взрыва
+	if ending_battle:
+		ending_timer -= delta
+		_update_particles(delta)
+		_update_engine_trail(delta)
+		queue_redraw()
+		if ending_timer <= 0.0:
+			_finalize_end()
+		return
+
+	if is_paused:
+		queue_redraw()
+		return
 
 	if hit_stun > 0: hit_stun -= delta
 
@@ -359,6 +415,7 @@ func _process(delta: float) -> void:
 
 	_update_projectiles(delta)
 	_update_particles(delta)
+	_update_engine_trail(delta)
 	_check_battle_end()
 	queue_redraw()
 
@@ -448,21 +505,53 @@ func _handle_auto_fire(delta: float) -> void:
 	if not hit: _status_lbl.text = "↗  Промах!"
 
 	match wtype:
-		"missile":
-			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset * 0.3,
-				w["damage"] * dmg_mult, "missile", true, target_enemy_idx))
+		"pulse":
+			# Скорострел — одиночный лёгкий снаряд
+			projectiles.append(_make_proj(player_pos + fwd * 24, aim + offset,
+				w["damage"] * dmg_mult, "energy", false, target_enemy_idx))
+		"energy":
+			# Лазерные пушки — одиночный точный выстрел
+			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset,
+				w["damage"] * dmg_mult, "energy", false, target_enemy_idx))
+		"emp":
+			# Электропушка
+			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset * 0.5,
+				w["damage"] * dmg_mult, "emp", false, target_enemy_idx))
+		"turbolaser":
+			# Турболазерные батареи — двойной залп
+			for side: float in [-0.07, 0.07]:
+				var sp_off := 0.0 if hit else randf_range(miss_sp * 0.3, miss_sp * 0.7)
+				projectiles.append(_make_proj(player_pos + fwd * 28, aim + side + sp_off,
+					w["damage"] * dmg_mult, "energy", false, target_enemy_idx))
 		"plasma":
+			# Плазменные пушки — веер из 3 снарядов
 			var dmg: int = int(w["damage"] * 0.55) * dmg_mult
 			for sp: float in [-0.14, 0.0, 0.14]:
 				var sp_off := 0.0 if randf() < accuracy else randf_range(miss_sp * 0.4, miss_sp)
 				projectiles.append(_make_proj(player_pos + fwd * 28, aim + sp + sp_off,
 					dmg, "plasma", false, target_enemy_idx))
+		"torpedo":
+			# Торпеды Z-120 — проверка боезапаса
+			var ammo_left: int = w.get("ammo_left", 0)
+			if ammo_left <= 0:
+				_status_lbl.text = "⚠  Торпеды израсходованы!"
+				auto_fire_timer = 0.3
+				return
+			w["ammo_left"] = ammo_left - 1
+			_status_lbl.text = "🚀  Торпеда! Осталось: %d" % w["ammo_left"]
+			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset * 0.2,
+				w["damage"] * dmg_mult, "missile", true, target_enemy_idx))
+		"missile":
+			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset * 0.3,
+				w["damage"] * dmg_mult, "missile", true, target_enemy_idx))
+		"railgun":
+			# Рельсовая пушка — сверхтяжёлый одиночный выстрел
+			_status_lbl.text = "💥  РЕЛЬСОВАЯ ПУШКА — %d урона!" % (w["damage"] * dmg_mult)
+			projectiles.append(_make_proj(player_pos + fwd * 32, aim + offset * 0.15,
+				w["damage"] * dmg_mult, "kinetic", false, target_enemy_idx))
 		"kinetic":
 			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset,
 				w["damage"] * dmg_mult, "kinetic", false, target_enemy_idx))
-		"emp":
-			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset * 0.5,
-				w["damage"] * dmg_mult, "emp", false, target_enemy_idx))
 		_:
 			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset,
 				w["damage"] * dmg_mult, wtype, false, target_enemy_idx))
@@ -470,6 +559,7 @@ func _handle_auto_fire(delta: float) -> void:
 	weapon_cooldowns[w["name"]] = wcd
 	auto_fire_timer = wcd
 	_create_muzzle_flash(player_pos + fwd * 24, Color(0.3, 0.85, 1.0))
+	AudioManager.play_sfx("laser")
 
 func _make_proj(pos: Vector2, angle: float, dmg: int, typ: String,
 				is_m: bool, target_idx: int = -1) -> Dictionary:
@@ -652,7 +742,7 @@ func _activate_upgrade(uid: String) -> void:
 # ── Retreat ───────────────────────────────────────────────────────────────────
 
 func _try_retreat() -> void:
-	if finished: return
+	if finished or ending_battle: return
 	var spd: int = GameManager.current_ship.get("speed", 200)
 	# More enemies = harder to retreat
 	var living := 0
@@ -663,6 +753,7 @@ func _try_retreat() -> void:
 		finished = true
 		_save_hull()
 		GameManager.combat_result = "retreat"
+		GameManager.record_combat_result(_damage_dealt, _damage_absorbed, _ships_destroyed, false)
 		_status_lbl.text = "🏃  Отступление удалось!"
 		await get_tree().create_timer(1.4).timeout
 		get_tree().change_scene_to_file("res://scenes/star_system/StarSystemView.tscn")
@@ -723,10 +814,15 @@ func _update_projectiles(delta: float) -> void:
 # ── Damage ────────────────────────────────────────────────────────────────────
 
 func _player_take_damage(amount: int) -> void:
+	_damage_absorbed += amount  # весь входящий урон считается поглощённым
 	if player_shields > 0:
 		var absorb := mini(amount, player_shields)
 		player_shields -= absorb
 		amount         -= absorb
+		if absorb > 0:
+			AudioManager.play_sfx("shield")
+	if amount > 0:
+		AudioManager.play_sfx("hurt")
 	player_hull  = maxi(player_hull - amount, 0)
 	damage_flash = 0.40
 	hit_stun     = 0.18
@@ -736,12 +832,15 @@ func _enemy_take_damage(e: Dictionary, _ei: int, amount: int, dtype: String) -> 
 	if dtype == "emp":
 		e["atk_interval"] = minf(e["atk_interval"] + 1.4, 7.0)
 		_status_lbl.text = "⚡  ЭМИ нарушил системы %s!" % e["name"]
+	_damage_dealt += mini(amount, maxi(e["hull"], 0))  # только реально нанесённый урон
 	e["hull"] = maxi(e["hull"] - amount, 0)
 	particles.append({"pos": e["pos"], "vel": Vector2.ZERO,
 		"life": 0.26, "max_life": 0.26,
 		"color": Color(1.0, 0.82, 0.3, 0.8), "type": "flash", "size": 40.0})
 	if e["hull"] <= 0:
+		_ships_destroyed += 1
 		_create_explosion(e["pos"], Color(1.0, 0.45, 0.1), 100)
+		AudioManager.play_sfx("explosion")
 
 # ── Battle end ────────────────────────────────────────────────────────────────
 
@@ -749,14 +848,16 @@ func _save_hull() -> void:
 	GameManager.ship_hull_pct = clampf(float(player_hull) / float(player_max_hull), 0.0, 1.0)
 
 func _check_battle_end() -> void:
-	if finished: return
+	if finished or ending_battle: return
+
 	if player_hull <= 0:
-		finished = true
+		_pending_defeat = true
 		GameManager.ship_hull_pct = 0.05
 		GameManager.combat_result = "lost"
 		_status_lbl.text = "💀  ВАШ КОРАБЛЬ УНИЧТОЖЕН!"
 		_create_explosion(player_pos, Color(0.3, 0.55, 1.0), 80)
-		_end_async()
+		ending_battle = true
+		ending_timer  = 2.2   # ждём анимацию взрыва игрока
 		return
 
 	var all_dead := true
@@ -765,22 +866,50 @@ func _check_battle_end() -> void:
 			all_dead = false
 			break
 	if all_dead:
-		finished = true
 		_save_hull()
 		GameManager.combat_result = "won"
-		var earned := 0
+		_pending_earned = 0
 		for e in enemies:
-			earned += int(e["max_hull"] * randf_range(12, 24))
-		GameManager.add_credits(earned)
+			_pending_earned += int(e["max_hull"] * randf_range(12, 24))
+		GameManager.add_credits(_pending_earned)
 		var count := enemies.size()
 		var msg := "🏆  ПОБЕДА! "
 		msg += ("%d противников уничтожено! " % count) if count > 1 else ("%s уничтожен! " % enemies[0]["name"])
-		msg += "+%d кред." % earned
+		msg += "+%d кред." % _pending_earned
 		_status_lbl.text = msg
-		_end_async()
+		ending_battle = true
+		ending_timer  = 1.8   # ждём анимацию взрыва последнего врага
 
-func _end_async() -> void:
-	await get_tree().create_timer(2.8).timeout
+func _finalize_end() -> void:
+	finished = true
+	var victory := not _pending_defeat
+	GameManager.record_combat_result(_damage_dealt, _damage_absorbed, _ships_destroyed, victory)
+
+	# Обновление репутации у фракций
+	var faction := GameManager.current_faction
+	if victory:
+		if faction == "Пираты" or faction == "Нет":
+			# Уничтожали пиратов — хорошие ребята довольны
+			GameManager.change_reputation("Федерация",   _ships_destroyed * 3)
+			GameManager.change_reputation("Торговцы",    _ships_destroyed * 2)
+			GameManager.change_reputation("Независимые", _ships_destroyed)
+			GameManager.change_reputation("Пираты",     -_ships_destroyed * 5)
+		else:
+			# Уничтожали корабли другой фракции — они злятся
+			GameManager.change_reputation(faction, -_ships_destroyed * 4)
+			GameManager.change_reputation("Пираты", _ships_destroyed)
+
+	if _pending_defeat:
+		AudioManager.play_sfx("defeat")
+	else:
+		AudioManager.play_sfx("victory")
+		_status_lbl.text = ("📊  ИТОГИ БОЯ  |  Нанесено: %d  |  Получено: %d  |  Уничтожено: %d  |  +%d кред." %
+			[_damage_dealt, _damage_absorbed, _ships_destroyed, _pending_earned])
+	GameManager.save_game()
+	_exit_to_system()
+
+func _exit_to_system() -> void:
+	await get_tree().create_timer(3.2).timeout
 	get_tree().change_scene_to_file("res://scenes/star_system/StarSystemView.tscn")
 
 # ── Particles ─────────────────────────────────────────────────────────────────
@@ -811,6 +940,21 @@ func _update_particles(delta: float) -> void:
 			p["pos"] += p["vel"] * delta
 			p["vel"]  = Vector2(p["vel"].x * 0.90, p["vel"].y * 0.90 + 48.0 * delta)
 		if p["life"] <= 0: particles.remove_at(i)
+
+func _update_engine_trail(delta: float) -> void:
+	# Добавляем новую точку если игрок движется
+	if has_move_target and not finished and not is_paused:
+		engine_trail.append({
+			"pos":      player_pos,
+			"life":     0.45,
+			"max_life": 0.45,
+			"angle":    player_angle,
+		})
+	# Обновляем жизнь точек
+	for i in range(engine_trail.size() - 1, -1, -1):
+		engine_trail[i]["life"] -= delta
+		if engine_trail[i]["life"] <= 0:
+			engine_trail.remove_at(i)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DRAWING
@@ -859,6 +1003,15 @@ func _draw() -> void:
 		if e["hull"] > 0:
 			var is_target := i == target_enemy_idx
 			_draw_enemy_ship(e["pos"] + sk, e["angle"], e["variant"], e, is_target)
+
+	# След двигателя
+	for pt in engine_trail:
+		var alpha: float = float(pt["life"]) / float(pt["max_life"])
+		var sz:    float = alpha * 5.5
+		var fwd   := Vector2(sin(pt["angle"]), -cos(pt["angle"]))
+		var back  := (pt["pos"] as Vector2) - fwd * 14.0
+		draw_circle(back + sk, sz,       Color(0.28, 0.62, 1.0, alpha * 0.55))
+		draw_circle(back + sk, sz * 0.5, Color(0.55, 0.85, 1.0, alpha * 0.80))
 
 	if player_hull > 0:
 		_draw_player_ship(player_pos + sk, player_angle)
@@ -1267,8 +1420,13 @@ func _draw_hud(vp: Vector2, arena: float) -> void:
 				Color(0.22, 0.55, 0.22, 0.18))
 		# Store clickable rect
 		_weapon_rects[i] = Rect2(pad - 2, wy - row_h + 2, lw - pad * 2, row_h)
+		var ammo_txt: String = ""
+		if w.has("ammo_left"):
+			ammo_txt = "  [%d🚀]" % w["ammo_left"] if w["ammo_left"] > 0 else "  [ПУСТО]"
+		elif w.get("type","") == "railgun":
+			ammo_txt = "  [РЕЛЬСА]"
 		draw_string(font, Vector2(pad, wy),
-			("▶ " if sel else "  ") + w["name"] + ("  ГОТОВО" if ready else "  %.1fs" % cd),
+			("▶ " if sel else "  ") + w["name"] + ammo_txt + ("  ГОТОВО" if ready else "  %.1fs" % cd),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, wcol)
 		var bx := pad + 155.0; var bww := minf(lw - pad*2 - 158, 82)
 		draw_rect(Rect2(bx, wy - 9, bww, 5), Color(0.04, 0.04, 0.12, 0.90))

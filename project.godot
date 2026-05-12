@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 GameManager="*res://scripts/core/GameManager.gd"
 GameData="*res://scripts/core/GameData.gd"
+AudioManager="*res://scripts/core/AudioManager.gd"
 
 [rendering]
 

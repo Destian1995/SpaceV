@@ -197,7 +197,7 @@ func _populate_weapons() -> void:
 	var slot_col := Color(0.3, 1.0, 0.5) if used < slots else Color(1.0, 0.4, 0.3)
 	slot_hb.add_child(_lbl("🔫 Слоты: %d / %d" % [used, slots], 17, slot_col))
 
-	var cat_ru := {"light": "лёгкое", "medium": "среднее", "heavy": "тяжёлое"}
+	var cat_ru := {"light": "лёгкое", "medium": "среднее", "heavy": "тяжёлое", "superheavy": "сверхтяжёлое"}
 	var allowed_str := "  |  Разрешено: " + ", ".join(allowed.map(func(c): return cat_ru.get(c, c)))
 	slot_hb.add_child(_lbl(allowed_str, 13, Color(0.55, 0.75, 1.0)))
 
@@ -223,7 +223,7 @@ func _populate_weapons() -> void:
 
 	_weapons_list.add_child(_lbl("— В продаже —", 13, Color(0.5, 0.5, 0.5)))
 
-	var cat_icon := {"light": "🔹", "medium": "🔶", "heavy": "🔴"}
+	var cat_icon := {"light": "🔹", "medium": "🔶", "heavy": "🔴", "superheavy": "💀"}
 	for w in available:
 		var owned:    bool   = w["name"] in GameManager.equipped_weapons
 		var cat:      String = GameData.WEAPON_CATEGORY.get(w["name"], "medium")
@@ -389,6 +389,147 @@ func _populate_bar() -> void:
 
 		_bar_list.add_child(news_card)
 
+	_populate_factions()
+
+func _populate_factions() -> void:
+	# ── Фракционный офицер ───────────────────────────────────────────────────────
+	_bar_list.add_child(HSeparator.new())
+	var fac_hdr := HBoxContainer.new()
+	_bar_list.add_child(fac_hdr)
+	var fac_icon := _lbl("⚔", 28)
+	fac_icon.custom_minimum_size = Vector2(40, 0)
+	fac_hdr.add_child(fac_icon)
+	var fac_title_vb := VBoxContainer.new()
+	fac_title_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fac_hdr.add_child(fac_title_vb)
+	fac_title_vb.add_child(_lbl("ФРАКЦИОННЫЙ ОФИЦЕР", 17, Color(0.9, 0.82, 0.3)))
+	fac_title_vb.add_child(_lbl("«Хочешь служить или командовать — у меня есть предложения.»", 12, Color(0.65, 0.65, 0.65)))
+
+	_bar_list.add_child(HSeparator.new())
+
+	# Текущее членство
+	if GameManager.player_faction != "":
+		var is_leader: bool = GameManager.faction_leader_of == GameManager.player_faction
+		var status_txt := "👑 ВЫ — ОСНОВАТЕЛЬ  «%s»" % GameManager.player_faction if is_leader \
+			else "✅ Вы состоите во фракции  «%s»" % GameManager.player_faction
+		var status_col := Color(1.0, 0.88, 0.2) if is_leader else Color(0.3, 1.0, 0.55)
+		_bar_list.add_child(_lbl(status_txt, 16, status_col))
+
+		var leave_row := HBoxContainer.new()
+		_bar_list.add_child(leave_row)
+		leave_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var leave_btn := Button.new()
+		leave_btn.text = "Покинуть фракцию"
+		leave_btn.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
+		leave_btn.custom_minimum_size = Vector2(200, 40)
+		leave_btn.pressed.connect(func():
+			GameManager.faction_leave()
+			_populate_bar()
+			_refresh_credits())
+		leave_row.add_child(leave_btn)
+		return
+
+	# Список фракций для вступления
+	_bar_list.add_child(_lbl("ВСТУПИТЬ В ФРАКЦИЮ", 14, Color(0.55, 0.75, 1.0)))
+	_bar_list.add_child(_lbl("  Требуется репутация ≥ 25 (Дружественный). Штаб-квартира указана в скобках.", 12, Color(0.5, 0.5, 0.55)))
+	_bar_list.add_child(HSeparator.new())
+
+	const FACTION_HQ := {
+		"Федерация":   "Sol Prime",
+		"Торговцы":    "Auren Gate",
+		"Независимые": "Nova Reach",
+		"Пираты":      "Scarlet Nebula",
+		"Империя":     "Orion Breach",
+	}
+	const FACTION_ICONS := {
+		"Федерация":   "🔵",
+		"Торговцы":    "🟡",
+		"Независимые": "⚪",
+		"Пираты":      "💀",
+		"Империя":     "🔴",
+	}
+	const FACTION_DESC := {
+		"Федерация":   "Порядок, закон, защита. Бонусы в безопасных системах.",
+		"Торговцы":    "Торговые маршруты, скидки, информация о рынках.",
+		"Независимые": "Свобода, нейтралитет. Доступ в закрытые зоны.",
+		"Пираты":      "Высокая прибыль, высокий риск. Все против тебя.",
+		"Империя":     "Мощь, ресурсы, жёсткая дисциплина. Экспансия.",
+	}
+
+	for faction in FACTION_HQ:
+		var rep: int = GameManager.faction_reputation.get(faction, 0)
+		var standing: String = GameManager.get_faction_standing(faction)
+		var can_join: bool = rep >= GameManager.FACTION_JOIN_REP
+		var hq: String = FACTION_HQ[faction]
+
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(0, 72)
+		var hb := HBoxContainer.new()
+		card.add_child(hb)
+
+		var ico_l := _lbl(FACTION_ICONS.get(faction, "·"), 26)
+		ico_l.custom_minimum_size = Vector2(42, 0)
+		ico_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hb.add_child(ico_l)
+
+		var info_vb := VBoxContainer.new()
+		info_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb.add_child(info_vb)
+
+		var name_row := HBoxContainer.new()
+		info_vb.add_child(name_row)
+		name_row.add_child(_lbl(faction, 17))
+		var hq_l := _lbl("  HQ: %s" % hq, 12, Color(0.5, 0.7, 0.5))
+		name_row.add_child(hq_l)
+
+		var rep_col := Color(0.3, 1.0, 0.45) if rep >= 25 else (Color(1.0, 0.82, 0.2) if rep >= -10 else Color(1.0, 0.4, 0.3))
+		info_vb.add_child(_lbl(FACTION_DESC.get(faction, ""), 12, Color(0.65, 0.65, 0.65)))
+		info_vb.add_child(_lbl("Репутация: %+d  (%s)" % [rep, standing], 13, rep_col))
+
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(160, 0)
+		if can_join:
+			btn.text = "✅ Вступить"
+			btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+		else:
+			var need := GameManager.FACTION_JOIN_REP - rep
+			btn.text = "🔒  нужно +%d реп." % need
+			btn.disabled = true
+		var f_cap: String = faction
+		btn.pressed.connect(func():
+			if GameManager.faction_join(f_cap):
+				_populate_bar()
+				_refresh_credits())
+		hb.add_child(btn)
+
+		_bar_list.add_child(card)
+
+	# Создать свою фракцию
+	_bar_list.add_child(HSeparator.new())
+	_bar_list.add_child(_lbl("СОЗДАТЬ СВОЮ ФРАКЦИЮ", 14, Color(1.0, 0.85, 0.3)))
+	_bar_list.add_child(_lbl("  Стоимость: %d кред. Ваша фракция появится в галактике." % GameManager.FACTION_CREATE_COST,
+		12, Color(0.55, 0.55, 0.6)))
+
+	var create_row := HBoxContainer.new()
+	_bar_list.add_child(create_row)
+	create_row.add_child(_lbl("Название:", 14))
+	var name_input := LineEdit.new()
+	name_input.placeholder_text = "введи название..."
+	name_input.custom_minimum_size = Vector2(200, 0)
+	name_input.max_length = 30
+	create_row.add_child(name_input)
+	var create_btn := Button.new()
+	create_btn.text = "👑  Основать (%d к.)" % GameManager.FACTION_CREATE_COST
+	create_btn.add_theme_color_override("font_color", Color(1.0, 0.88, 0.2))
+	create_btn.disabled = GameManager.credits < GameManager.FACTION_CREATE_COST
+	create_btn.pressed.connect(func():
+		var fname: String = name_input.text.strip_edges()
+		if fname.is_empty(): return
+		if GameManager.faction_create(fname):
+			_populate_bar()
+			_refresh_credits())
+	create_row.add_child(create_btn)
+
 func _make_complete_card(q: Dictionary) -> PanelContainer:
 	var card := PanelContainer.new()
 	card.custom_minimum_size = Vector2(0, 90)
@@ -441,7 +582,15 @@ func _complete_quest_bar(q: Dictionary) -> void:
 	GameManager.active_quests.erase(q)
 	GameManager.completed_quests.append(q)
 	GameManager.add_credits(q["reward"])
-	print("[Bar] Quest completed: %s  +%d кред." % [q["title"], q["reward"]])
+
+	# Репутация: +8 к фракции текущей системы, +4 к фракции выдавшей задание (если отличается)
+	var dest_faction: String = GameManager.current_faction
+	GameManager.change_reputation(dest_faction, 8)
+	var origin_faction: String = q.get("origin_faction", "")
+	if origin_faction != "" and origin_faction != dest_faction:
+		GameManager.change_reputation(origin_faction, 4)
+
+	print("[Bar] Quest completed: %s  +%d кред.  +реп %s" % [q["title"], q["reward"], dest_faction])
 	_populate_bar()
 	_refresh_credits()
 
@@ -560,7 +709,9 @@ func _make_quest_card(q: Dictionary) -> PanelContainer:
 	return card
 
 func _accept_quest(q: Dictionary) -> void:
-	GameManager.active_quests.append(q.duplicate())
+	var qd: Dictionary = q.duplicate()
+	qd["origin_faction"] = GameManager.current_faction  # фракция системы где взяли задание
+	GameManager.active_quests.append(qd)
 	print("[Spaceport] Quest accepted: %s" % q["title"])
 	_populate_quests()
 	_refresh_credits()
@@ -619,9 +770,10 @@ func _populate_bank() -> void:
 		var need_lbl := _lbl("  ⚠ До минимума: %d к." % need, 13, Color(0.9, 0.6, 0.3))
 		dep_hdr.add_child(need_lbl)
 
+	# Быстрые кнопки депозита
 	var dep_row := HBoxContainer.new()
 	_bank_list.add_child(dep_row)
-	dep_row.add_child(_lbl("Положить на счёт:", 14))
+	dep_row.add_child(_lbl("Быстро:", 13, Color(0.6, 0.6, 0.6)))
 	for amt in [500, 1000, 5000, 10000, 25000]:
 		var b := Button.new()
 		b.text = "%d к." % amt
@@ -629,18 +781,63 @@ func _populate_bank() -> void:
 		b.pressed.connect(func(): _bank_do_deposit(amt))
 		dep_row.add_child(b)
 
+	# Произвольная сумма + "Положить всё"
+	var dep_custom_row := HBoxContainer.new()
+	_bank_list.add_child(dep_custom_row)
+	dep_custom_row.add_child(_lbl("Сумма:", 14))
+	var dep_input := LineEdit.new()
+	dep_input.placeholder_text = "введи сумму"
+	dep_input.custom_minimum_size = Vector2(140, 0)
+	dep_input.max_length = 12
+	dep_custom_row.add_child(dep_input)
+	var dep_custom_btn := Button.new()
+	dep_custom_btn.text = "Положить"
+	dep_custom_btn.pressed.connect(func():
+		var v: int = int(dep_input.text)
+		if v > 0: _bank_do_deposit(v))
+	dep_custom_row.add_child(dep_custom_btn)
+	var dep_all_btn := Button.new()
+	dep_all_btn.text = "Положить всё  (%d к.)" % GameManager.credits
+	dep_all_btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+	dep_all_btn.disabled = GameManager.credits <= 0
+	dep_all_btn.pressed.connect(func(): _bank_do_deposit(GameManager.credits))
+	dep_custom_row.add_child(dep_all_btn)
+
 	# ── Withdraw ──
 	_bank_list.add_child(HSeparator.new())
 	_bank_list.add_child(_lbl("СНЯТИЕ", 15, Color(0.4, 0.9, 0.5)))
+	# Быстрые кнопки
 	var wdr_row := HBoxContainer.new()
 	_bank_list.add_child(wdr_row)
-	wdr_row.add_child(_lbl("Снять со счёта:", 14))
+	wdr_row.add_child(_lbl("Быстро:", 13, Color(0.6, 0.6, 0.6)))
 	for amt in [500, 1000, 5000, 10000]:
 		var b := Button.new()
 		b.text = "%d к." % amt
 		b.disabled = GameManager.bank_balance < amt
 		b.pressed.connect(func(): _bank_do_withdraw(amt))
 		wdr_row.add_child(b)
+
+	# Произвольная сумма + "Снять всё"
+	var wdr_custom_row := HBoxContainer.new()
+	_bank_list.add_child(wdr_custom_row)
+	wdr_custom_row.add_child(_lbl("Сумма:", 14))
+	var wdr_input := LineEdit.new()
+	wdr_input.placeholder_text = "введи сумму"
+	wdr_input.custom_minimum_size = Vector2(140, 0)
+	wdr_input.max_length = 12
+	wdr_custom_row.add_child(wdr_input)
+	var wdr_custom_btn := Button.new()
+	wdr_custom_btn.text = "Снять"
+	wdr_custom_btn.pressed.connect(func():
+		var v: int = int(wdr_input.text)
+		if v > 0: _bank_do_withdraw(v))
+	wdr_custom_row.add_child(wdr_custom_btn)
+	var wdr_all_btn := Button.new()
+	wdr_all_btn.text = "Снять всё  (%d к.)" % GameManager.bank_balance
+	wdr_all_btn.add_theme_color_override("font_color", Color(1.0, 0.82, 0.2))
+	wdr_all_btn.disabled = GameManager.bank_balance <= 0
+	wdr_all_btn.pressed.connect(func(): _bank_do_withdraw(GameManager.bank_balance))
+	wdr_custom_row.add_child(wdr_all_btn)
 
 	# ── Loan ──
 	_bank_list.add_child(HSeparator.new())
@@ -748,46 +945,111 @@ func _populate_repair() -> void:
 		13, Color(0.5, 0.6, 0.7)))
 	_repair_list.add_child(HSeparator.new())
 
+	# ── Полное обслуживание (ремонт + заправка одной кнопкой) ────────────────────
+	var missing_fuel_full: float = GameManager.max_fuel - GameManager.fuel
+	const FUEL_PPU := 12
+	var full_repair_cost: int = maxi(1, int(float(missing) * cost_per_hp))
+	var full_fuel_cost:   int = int(missing_fuel_full * FUEL_PPU)
+	var has_damage: bool = missing > 0
+	var needs_fuel: bool = missing_fuel_full >= 0.5
+
+	if has_damage and needs_fuel:
+		var combo_cost: int = full_repair_cost + full_fuel_cost
+		_repair_list.add_child(_lbl("ПОЛНОЕ ОБСЛУЖИВАНИЕ", 15, Color(0.95, 0.82, 0.3)))
+		var combo_row := HBoxContainer.new()
+		_repair_list.add_child(combo_row)
+		var combo_desc := _lbl("🔧⛽  Полный ремонт + полная заправка", 15)
+		combo_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		combo_row.add_child(combo_desc)
+		var combo_cost_lbl := _lbl("%d кред." % combo_cost, 15, Color(1.0, 0.88, 0.3))
+		combo_cost_lbl.custom_minimum_size = Vector2(130, 0)
+		combo_cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		combo_row.add_child(combo_cost_lbl)
+		var combo_btn := Button.new()
+		combo_btn.text = "Обслужить всё"
+		combo_btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+		combo_btn.custom_minimum_size = Vector2(150, 0)
+		combo_btn.disabled = GameManager.credits < combo_cost
+		combo_btn.pressed.connect(func():
+			if GameManager.spend_credits(combo_cost):
+				GameManager.ship_hull_pct = 1.0
+				GameManager.fuel = GameManager.max_fuel
+				_populate_repair()
+				_refresh_credits())
+		combo_row.add_child(combo_btn)
+		_repair_list.add_child(HSeparator.new())
+
 	if missing <= 0:
 		_repair_list.add_child(_lbl("✅  Корабль в полном порядке — ремонт не требуется.", 16, Color(0.3, 1.0, 0.5)))
-		return
+	else:
+		_repair_list.add_child(_lbl("ВАРИАНТЫ РЕМОНТА", 15, Color(0.5, 0.8, 1.0)))
+		for pct_i in [25, 50, 75, 100]:
+			var hp_to_fix: int = maxi(1, int(float(missing) * float(pct_i) / 100.0))
+			var rcost:     int = maxi(1, int(float(hp_to_fix) * cost_per_hp))
+			var row := HBoxContainer.new()
+			_repair_list.add_child(row)
+			var desc_lbl := _lbl("%d%%  (+%d HP)" % [pct_i, hp_to_fix], 15)
+			desc_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(desc_lbl)
+			var cost_lbl := _lbl("%d кред." % rcost, 15, Color(1.0, 0.88, 0.3))
+			cost_lbl.custom_minimum_size = Vector2(120, 0)
+			cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			row.add_child(cost_lbl)
+			var btn := Button.new()
+			btn.text = "Починить"
+			btn.custom_minimum_size = Vector2(120, 0)
+			btn.disabled = GameManager.credits < rcost
+			var hp_cap: int   = hp_to_fix
+			var cost_cap: int = rcost
+			btn.pressed.connect(func(): _do_repair(hp_cap, cost_cap))
+			row.add_child(btn)
+		_repair_list.add_child(HSeparator.new())
+		_repair_list.add_child(_lbl(
+			"ℹ  Ремонт производится немедленно. Щиты восстанавливаются автоматически перед следующим боем.",
+			12, Color(0.4, 0.4, 0.45)))
 
-	# Repair options
-	_repair_list.add_child(_lbl("ВАРИАНТЫ РЕМОНТА", 15, Color(0.5, 0.8, 1.0)))
-
-	var options := []
-	# 25%, 50%, 75%, 100% of missing hull
-	for pct_i in [25, 50, 75, 100]:
-		var hp_to_fix: int = maxi(1, int(float(missing) * float(pct_i) / 100.0))
-		var cost:      int = maxi(1, int(float(hp_to_fix) * cost_per_hp))
-		options.append({"label": "%d%%  (+%d HP)" % [pct_i, hp_to_fix], "hp": hp_to_fix, "cost": cost})
-
-	for opt in options:
-		var row := HBoxContainer.new()
-		_repair_list.add_child(row)
-
-		var desc_lbl := _lbl(opt["label"], 15)
-		desc_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(desc_lbl)
-
-		var cost_lbl := _lbl("%d кред." % opt["cost"], 15, Color(1.0, 0.88, 0.3))
-		cost_lbl.custom_minimum_size = Vector2(120, 0)
-		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		row.add_child(cost_lbl)
-
-		var btn := Button.new()
-		btn.text = "Починить"
-		btn.custom_minimum_size = Vector2(120, 0)
-		btn.disabled = GameManager.credits < opt["cost"]
-		var hp_cap: int = opt["hp"]
-		var cost_cap: int = opt["cost"]
-		btn.pressed.connect(func(): _do_repair(hp_cap, cost_cap))
-		row.add_child(btn)
-
+	# ── Заправка топливом ──────────────────────────────────────────────────────
 	_repair_list.add_child(HSeparator.new())
-	_repair_list.add_child(_lbl(
-		"ℹ  Ремонт производится немедленно. Щиты восстанавливаются автоматически перед следующим боем.",
-		12, Color(0.4, 0.4, 0.45)))
+	_repair_list.add_child(_lbl("⛽  ЗАПРАВОЧНАЯ СТАНЦИЯ", 18, Color(0.95, 0.75, 0.2)))
+	var fuel_pct := GameManager.fuel / GameManager.max_fuel
+	var fuel_col := Color(0.2, 0.85, 0.3) if fuel_pct > 0.5 else \
+				   (Color(0.9, 0.72, 0.1) if fuel_pct > 0.25 else Color(0.95, 0.2, 0.2))
+	_repair_list.add_child(_lbl("Топливо: %.1f / %.1f  (%.0f%%)" % [
+		GameManager.fuel, GameManager.max_fuel, fuel_pct * 100], 16, fuel_col))
+
+	const FUEL_PRICE_PER_UNIT := 12  # кредитов за единицу топлива
+	var missing_fuel := GameManager.max_fuel - GameManager.fuel
+	if missing_fuel < 0.5:
+		_repair_list.add_child(_lbl("✅  Топливный бак полон.", 14, Color(0.3, 1.0, 0.5)))
+	else:
+		_repair_list.add_child(_lbl(
+			"💡 Тариф: %d кред. за единицу топлива" % FUEL_PRICE_PER_UNIT,
+			13, Color(0.5, 0.6, 0.7)))
+		for pct_i in [25, 50, 75, 100]:
+			var amount := GameManager.max_fuel * float(pct_i) / 100.0
+			var to_add  := minf(amount, missing_fuel)
+			if to_add < 0.5: continue
+			var cost   := int(to_add * FUEL_PRICE_PER_UNIT)
+			var row    := HBoxContainer.new()
+			_repair_list.add_child(row)
+			var dl := _lbl("+%.0f ед. (%d%%)" % [to_add, pct_i], 15)
+			dl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(dl)
+			var cl := _lbl("%d кред." % cost, 15, Color(1.0, 0.88, 0.3))
+			cl.custom_minimum_size = Vector2(120, 0)
+			cl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			row.add_child(cl)
+			var btn := Button.new()
+			btn.text = "Заправить"
+			btn.custom_minimum_size = Vector2(120, 0)
+			btn.disabled = GameManager.credits < cost
+			var amt_cap: float = to_add; var cost_cap: int = cost
+			btn.pressed.connect(func():
+				if GameManager.spend_credits(cost_cap):
+					GameManager.refuel(amt_cap)
+					_populate_repair()
+					_refresh_credits())
+			row.add_child(btn)
 
 func _do_repair(hp_amount: int, cost: int) -> void:
 	if not GameManager.spend_credits(cost):

@@ -108,6 +108,16 @@ func _build_ui() -> void:
 	quest_scroll.add_child(qv)
 	_populate_quests(qv)
 
+	# Personal file tab
+	var dossier_scroll := ScrollContainer.new()
+	dossier_scroll.name = "🎖 Личное дело"
+	dossier_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tabs.add_child(dossier_scroll)
+	var dv := VBoxContainer.new()
+	dv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dossier_scroll.add_child(dv)
+	_populate_dossier(dv)
+
 func _nav_btn(hb: HBoxContainer, text: String, cb: Callable) -> void:
 	var btn := Button.new()
 	btn.text = text
@@ -438,6 +448,149 @@ func _quest_card(q: Dictionary) -> PanelContainer:
 	vb.add_child(_lbl("💰 %d кред.  |  Сдать: %s" % [q["reward"], q.get("dest_galaxy","?")], 13, Color(1.0,0.85,0.25)))
 	vb.add_child(HSeparator.new())
 	return card
+
+# ── Personal file / dossier ──────────────────────────────────────────────────
+
+func _populate_dossier(vb: VBoxContainer) -> void:
+	vb.add_child(_lbl("ЛИЧНОЕ ДЕЛО КАПИТАНА", 15, Color(0.4, 0.6, 0.9)))
+	vb.add_child(_lbl("Текущий корабль: %s  [%s · %s]" % [
+		GameManager.current_ship.get("name","???"),
+		GameManager.current_ship.get("ship_type",""),
+		GameManager.current_ship.get("ship_class","C"),
+	], 13, Color(0.6, 0.7, 0.8)))
+	vb.add_child(_lbl("День в рейсе: %d  |  Кредитов: %d" % [
+		GameManager.day, GameManager.credits], 13, Color(0.55, 0.75, 0.55)))
+	vb.add_child(HSeparator.new())
+
+	# ── Score ────────────────────────────────────────────────────────────────────
+	var score: int = GameManager.get_score()
+	var score_row := HBoxContainer.new()
+	vb.add_child(score_row)
+	var score_icon := _lbl("🏅", 20)
+	score_icon.custom_minimum_size = Vector2(30, 0)
+	score_row.add_child(score_icon)
+	var score_name := _lbl("РЕЙТИНГ КАПИТАНА", 13, Color(0.4, 0.6, 0.9))
+	score_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	score_row.add_child(score_name)
+	var score_val := _lbl(str(score), 20, Color(1.0, 0.88, 0.2))
+	score_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	score_row.add_child(score_val)
+	vb.add_child(HSeparator.new())
+
+	# ── Fuel ─────────────────────────────────────────────────────────────────────
+	vb.add_child(_lbl("ТОПЛИВО", 13, Color(0.4, 0.6, 0.9)))
+	var fuel_pct := GameManager.fuel / GameManager.max_fuel
+	var fuel_row := HBoxContainer.new()
+	vb.add_child(fuel_row)
+	var fuel_lbl := _lbl("⛽  Топливо:", 14)
+	fuel_lbl.custom_minimum_size = Vector2(120, 0)
+	fuel_row.add_child(fuel_lbl)
+	var fuel_bar := ProgressBar.new()
+	fuel_bar.max_value = 100
+	fuel_bar.value = int(fuel_pct * 100)
+	fuel_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fuel_bar.custom_minimum_size = Vector2(0, 20)
+	if fuel_pct >= 0.6:
+		fuel_bar.modulate = Color(0.3, 1.0, 0.45)
+	elif fuel_pct >= 0.3:
+		fuel_bar.modulate = Color(1.0, 0.82, 0.2)
+	else:
+		fuel_bar.modulate = Color(1.0, 0.3, 0.2)
+	fuel_row.add_child(fuel_bar)
+	var fuel_col := Color(0.3, 1.0, 0.45) if fuel_pct >= 0.6 else \
+		(Color(1.0, 0.82, 0.2) if fuel_pct >= 0.3 else Color(1.0, 0.3, 0.2))
+	var fuel_num := _lbl("%.0f/%.0f" % [GameManager.fuel, GameManager.max_fuel], 13, fuel_col)
+	fuel_num.custom_minimum_size = Vector2(72, 0)
+	fuel_num.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	fuel_row.add_child(fuel_num)
+	vb.add_child(HSeparator.new())
+
+	# ── Combat stats ─────────────────────────────────────────────────────────────
+	vb.add_child(_lbl("БОЕВЫЕ ПОКАЗАТЕЛИ", 13, Color(0.4, 0.6, 0.9)))
+	var stats := [
+		["⚔  Нанесено урона:",     GameManager.total_damage_dealt,    Color(1.0, 0.55, 0.25)],
+		["🛡  Поглощено урона:",    GameManager.total_damage_absorbed, Color(0.35, 0.65, 1.0)],
+		["💀  Уничтожено кораблей:", GameManager.total_ships_destroyed, Color(0.85, 0.25, 0.25)],
+		["🏆  Победных боёв:",       GameManager.total_battles_won,     Color(0.25, 0.95, 0.45)],
+	]
+	for st in stats:
+		var row := HBoxContainer.new()
+		vb.add_child(row)
+		var lbl_name := _lbl(st[0], 14)
+		lbl_name.custom_minimum_size = Vector2(200, 0)
+		row.add_child(lbl_name)
+		var lbl_val := _lbl(str(st[1]), 16, st[2])
+		lbl_val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		lbl_val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(lbl_val)
+	vb.add_child(HSeparator.new())
+
+	# ── Faction reputation ───────────────────────────────────────────────────────
+	vb.add_child(_lbl("РЕПУТАЦИЯ ФРАКЦИЙ", 13, Color(0.4, 0.6, 0.9)))
+	var faction_icons := {
+		"Федерация":    "🔵",
+		"Торговцы":     "🟡",
+		"Независимые":  "⚪",
+		"Пираты":       "💀",
+		"Империя":      "🔴",
+		"Нет":          "—",
+	}
+	for faction in GameManager.faction_reputation:
+		var rep: int = GameManager.faction_reputation[faction]
+		var standing: String = GameManager.get_faction_standing(faction)
+		var rep_pct := clampf((float(rep) + 100.0) / 200.0, 0.0, 1.0)
+		var rep_col: Color
+		if rep >= 50:
+			rep_col = Color(0.2, 1.0, 0.45)
+		elif rep >= 10:
+			rep_col = Color(0.55, 0.85, 0.55)
+		elif rep >= -10:
+			rep_col = Color(0.65, 0.65, 0.65)
+		elif rep >= -50:
+			rep_col = Color(1.0, 0.55, 0.2)
+		else:
+			rep_col = Color(1.0, 0.2, 0.2)
+
+		var f_row := HBoxContainer.new()
+		vb.add_child(f_row)
+
+		var icon_l := _lbl(faction_icons.get(faction, "·"), 14)
+		icon_l.custom_minimum_size = Vector2(24, 0)
+		f_row.add_child(icon_l)
+
+		var name_l := _lbl(faction, 13)
+		name_l.custom_minimum_size = Vector2(105, 0)
+		f_row.add_child(name_l)
+
+		var f_bar := ProgressBar.new()
+		f_bar.max_value = 100
+		f_bar.value = int(rep_pct * 100)
+		f_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		f_bar.custom_minimum_size = Vector2(0, 16)
+		f_bar.modulate = rep_col
+		f_row.add_child(f_bar)
+
+		var rep_lbl := _lbl("%+d  %s" % [rep, standing], 12, rep_col)
+		rep_lbl.custom_minimum_size = Vector2(108, 0)
+		rep_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		f_row.add_child(rep_lbl)
+	vb.add_child(HSeparator.new())
+
+	# ── Equipment ────────────────────────────────────────────────────────────────
+	vb.add_child(_lbl("СНАРЯЖЕНИЕ", 13, Color(0.4, 0.6, 0.9)))
+	if GameManager.equipped_weapons.is_empty():
+		vb.add_child(_lbl("  Оружие не установлено", 13, Color(0.45, 0.45, 0.5)))
+	else:
+		for w in GameManager.equipped_weapons:
+			vb.add_child(_lbl("  ⚔  " + str(w), 14))
+	vb.add_child(HSeparator.new())
+	vb.add_child(_lbl("ЗАВЕРШЁННЫЕ ЗАДАНИЯ: %d" % GameManager.completed_quests.size(),
+		14, Color(0.3, 0.85, 0.45)))
+	if GameManager.completed_quests.is_empty():
+		vb.add_child(_lbl("  Нет выполненных заданий", 13, Color(0.45, 0.45, 0.5)))
+	else:
+		for q in GameManager.completed_quests:
+			vb.add_child(_lbl("  ✅ %s" % q.get("title","???"), 13, Color(0.55, 0.85, 0.55)))
 
 # ── Draw ──────────────────────────────────────────────────────────────────────
 

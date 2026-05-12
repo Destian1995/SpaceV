@@ -54,6 +54,19 @@ text = "▶   НАЧАТЬ ИГРУ"
 custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
 
+[node name="ContinueButton" type="Button" parent="UI/VBox"]
+visible = false
+custom_minimum_size = Vector2(340, 64)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.4, 1, 0.6, 1)
+theme_override_font_sizes/font_size = 26
+text = "▶   ПРОДОЛЖИТЬ"
+
+[node name="GapContinue" type="Control" parent="UI/VBox"]
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+
 [node name="QuitButton" type="Button" parent="UI/VBox"]
 custom_minimum_size = Vector2(200, 46)
 layout_mode = 2

@@ -42,6 +42,18 @@ func _ready() -> void:
 	$UI/VBox/StartButton.pressed.connect(_on_start)
 	$UI/VBox/QuitButton.pressed.connect(_on_quit)
 
+	# Кнопка "Продолжить" — только если есть сохранение
+	var continue_btn := $UI/VBox/ContinueButton
+	if GameManager.has_save():
+		continue_btn.visible = true
+		continue_btn.pressed.connect(_on_continue)
+	else:
+		continue_btn.visible = false
+
+func _on_continue() -> void:
+	if GameManager.load_game():
+		get_tree().change_scene_to_file("res://scenes/galaxy_map/GalaxyMap.tscn")
+
 func _process(delta: float) -> void:
 	time_e += delta
 
@@ -141,6 +153,24 @@ func _draw() -> void:
 		draw_circle(Vector2(title_x + side * 280, line_y), 2.5, Color(0.4, 0.7, 1.0, la * 2))
 
 func _on_start() -> void:
+	# Новая игра — сброс прогресса
+	GameManager.credits           = 500000
+	GameManager.day               = 1
+	GameManager.current_galaxy    = "Sol Prime"
+	GameManager.current_galaxy_idx= 0
+	GameManager.current_danger    = 1
+	GameManager.current_faction   = "Федерация"
+	GameManager.ship_hull_pct     = 1.0
+	GameManager.visited_systems   = [0]
+	GameManager.fuel              = 100.0
+	GameManager.total_damage_dealt    = 0
+	GameManager.total_damage_absorbed = 0
+	GameManager.total_ships_destroyed = 0
+	GameManager.total_battles_won     = 0
+	GameManager.faction_reputation    = {
+		"Федерация": 0, "Торговцы": 0, "Независимые": 0,
+		"Пираты": -50, "Империя": 0, "Нет": 0,
+	}
 	get_tree().change_scene_to_file("res://scenes/galaxy_map/GalaxyMap.tscn")
 
 func _on_quit() -> void:

@@ -2,19 +2,19 @@ extends Node2D
 
 const SYSTEMS = [
 	# Core Federation space
-	{"name": "Sol Prime",      "pos": Vector2(480, 340), "faction": "Федерация",   "danger": 1, "color": Color(0.45, 0.85, 1.0),  "size": 11},
+	{"name": "Sol Prime",      "pos": Vector2(480, 340), "faction": "Федерация",   "danger": 1, "color": Color(0.45, 0.85, 1.0),  "size": 11, "is_hq": true},
 	{"name": "Krath Station",  "pos": Vector2(750, 190), "faction": "Федерация",   "danger": 2, "color": Color(0.35, 0.65, 1.0),  "size": 9},
-	{"name": "Auren Gate",     "pos": Vector2(310, 195), "faction": "Торговцы",    "danger": 2, "color": Color(0.3,  1.0,  0.6),  "size": 10},
-	{"name": "Nova Reach",     "pos": Vector2(140, 360), "faction": "Независимые", "danger": 2, "color": Color(0.6,  0.9,  0.7),  "size": 8},
+	{"name": "Auren Gate",     "pos": Vector2(310, 195), "faction": "Торговцы",    "danger": 2, "color": Color(0.3,  1.0,  0.6),  "size": 10, "is_hq": true},
+	{"name": "Nova Reach",     "pos": Vector2(140, 360), "faction": "Независимые", "danger": 2, "color": Color(0.6,  0.9,  0.7),  "size": 8,  "is_hq": true},
 	# Mid-rim
 	{"name": "Vega Drift",     "pos": Vector2(230, 510), "faction": "Независимые", "danger": 3, "color": Color(0.95, 0.95, 0.3),  "size": 10},
 	{"name": "Pyrox",          "pos": Vector2(840, 530), "faction": "Империя",     "danger": 3, "color": Color(1.0,  0.52, 0.22), "size": 9},
 	{"name": "Helion Crossing","pos": Vector2(600, 250), "faction": "Торговцы",    "danger": 2, "color": Color(0.5,  1.0,  0.85), "size": 9},
-	{"name": "Orion Breach",   "pos": Vector2(970, 280), "faction": "Империя",     "danger": 3, "color": Color(1.0,  0.7,  0.25), "size": 8},
+	{"name": "Orion Breach",   "pos": Vector2(970, 280), "faction": "Империя",     "danger": 3, "color": Color(1.0,  0.7,  0.25), "size": 8,  "is_hq": true},
 	{"name": "Thalara",        "pos": Vector2(380, 450), "faction": "Независимые", "danger": 3, "color": Color(0.7,  0.55, 1.0),  "size": 8},
 	{"name": "Cassian Rift",   "pos": Vector2(700, 400), "faction": "Независимые", "danger": 3, "color": Color(0.55, 0.8,  0.55), "size": 8},
 	# Outer rim / danger
-	{"name": "Scarlet Nebula", "pos": Vector2(980, 450), "faction": "Пираты",      "danger": 4, "color": Color(1.0,  0.28, 0.28), "size": 10},
+	{"name": "Scarlet Nebula", "pos": Vector2(980, 450), "faction": "Пираты",      "danger": 4, "color": Color(1.0,  0.28, 0.28), "size": 10, "is_hq": true},
 	{"name": "Echo Void",      "pos": Vector2(580, 610), "faction": "Нет",         "danger": 5, "color": Color(0.5,  0.5,  0.72), "size": 9},
 	{"name": "Malachar Deep",  "pos": Vector2(160, 590), "faction": "Пираты",      "danger": 4, "color": Color(0.9,  0.35, 0.35), "size": 8},
 	{"name": "Void Station",   "pos": Vector2(860, 650), "faction": "Нет",         "danger": 5, "color": Color(0.4,  0.4,  0.65), "size": 9},
@@ -39,14 +39,28 @@ const CONNECTIONS = [
 	[13,15],
 ]
 
-const JUMP_COST := 500
-const JUMP_DAYS := 1
+# Стоимость и время прыжка рассчитываются динамически по расстоянию
+const JUMP_COST_PER_PX := 2.0
+const JUMP_DAY_PX      := 130.0
+const JUMP_MIN_COST    := 300
+const FUEL_PER_PX      := 0.12   # топливо за 1 пиксель расстояния
+const TRAVEL_DUR       := 1.5    # секунд анимации перелёта
+
+# Шанс случайной встречи в гиперпространстве (базовый + danger-множитель)
+const ENCOUNTER_BASE   := 0.08
+const ENCOUNTER_DANGER := 0.055
 
 var current_idx:  int = 0
 var selected_idx: int = -1
 var bg_stars:     Array = []
 var nebulae:      Array = []
 var time_e:       float = 0.0
+
+# ── Анимация перелёта (мерцающая точка) ───────────────────────────────────────
+var _travel_active: bool    = false
+var _travel_t:      float   = 0.0
+var _travel_from:   Vector2 = Vector2.ZERO
+var _travel_to:     Vector2 = Vector2.ZERO
 
 # Camera pan
 var cam_pan:      Vector2 = Vector2.ZERO
@@ -117,6 +131,10 @@ func _gen_background() -> void:
 
 func _process(delta: float) -> void:
 	time_e += delta
+	if _travel_active:
+		_travel_t = minf(_travel_t + delta / TRAVEL_DUR, 1.0)
+		if _travel_t >= 1.0:
+			_travel_active = false
 	queue_redraw()
 
 func _draw() -> void:
@@ -156,6 +174,27 @@ func _draw() -> void:
 	for i in SYSTEMS.size():
 		_draw_system(i, cam_pan)
 
+	# Мерцающая точка перелёта
+	if _travel_active:
+		_draw_travel_dot()
+
+func _draw_travel_dot() -> void:
+	var pos := _travel_from.lerp(_travel_to, _travel_t) + cam_pan
+	var pulse := 0.7 + sin(time_e * 18.0) * 0.3
+	# Шлейф
+	for i in 10:
+		var trail_t := _travel_t - float(i + 1) * 0.016
+		if trail_t < 0.0: break
+		var tp    := _travel_from.lerp(_travel_to, trail_t) + cam_pan
+		var alpha := (1.0 - float(i) / 10.0) * 0.45 * pulse
+		draw_circle(tp, maxf(3.0 - float(i) * 0.25, 0.5), Color(0.55, 0.85, 1.0, alpha))
+	# Свечение
+	draw_circle(pos, 16.0, Color(0.35, 0.72, 1.0, 0.06 * pulse))
+	draw_circle(pos, 10.0, Color(0.50, 0.85, 1.0, 0.14 * pulse))
+	draw_circle(pos,  6.0, Color(0.70, 0.95, 1.0, 0.32 * pulse))
+	draw_circle(pos,  3.5, Color(0.88, 0.98, 1.0, 0.75))
+	draw_circle(pos,  1.8, Color(1.0,  1.0,  1.0, 1.0))
+
 func _draw_system(i: int, offset: Vector2 = Vector2.ZERO) -> void:
 	var s    = SYSTEMS[i]
 	var pos: Vector2 = s["pos"] + offset
@@ -164,6 +203,30 @@ func _draw_system(i: int, offset: Vector2 = Vector2.ZERO) -> void:
 	var is_current  := (i == current_idx)
 	var is_selected := (i == selected_idx)
 	var danger: int  = s["danger"]
+
+	# ── Туман войны — неизвестные системы ────────────────────────────────────
+	var visited: bool = i in GameManager.visited_systems
+	# «известная» — соединена с посещённой
+	var known: bool = visited
+	if not known:
+		for c in CONNECTIONS:
+			if (c[0] == i and c[1] in GameManager.visited_systems) or \
+			   (c[1] == i and c[0] in GameManager.visited_systems):
+				known = true
+				break
+
+	if not known:
+		return  # полностью скрыта
+
+	if not visited:
+		# Частично видна: тусклое пятно + "???"
+		draw_circle(pos, sz * 1.8, Color(col.r * 0.15, col.g * 0.15, col.b * 0.25, 0.45))
+		draw_circle(pos, sz * 0.9, Color(col.r * 0.25, col.g * 0.25, col.b * 0.35, 0.70))
+		draw_string(ThemeDB.fallback_font, pos + Vector2(-15, sz + 18),
+			"???", HORIZONTAL_ALIGNMENT_CENTER, 35, 12, Color(0.35, 0.38, 0.55, 0.70))
+		if is_selected:
+			draw_arc(pos, sz + 13, 0, TAU, 36, Color(1.0, 1.0, 1.0, 0.60), 1.5)
+		return
 
 	# Danger zone outer glow (red tint for high danger)
 	if danger >= 4:
@@ -220,6 +283,21 @@ func _draw_system(i: int, offset: Vector2 = Vector2.ZERO) -> void:
 		s["faction"], HORIZONTAL_ALIGNMENT_CENTER, 105, 11,
 		Color(col.r*0.5+0.2, col.g*0.5+0.2, col.b*0.4+0.3, 0.65))
 
+	# HQ badge — diamond ring + "HQ" label
+	if s.get("is_hq", false):
+		var hq_pulse: float = 0.55 + sin(time_e * 1.6 + float(i)) * 0.25
+		var hq_r: float = sz + 7.0
+		# Four diamond points
+		for di in 4:
+			var da: float = di / 4.0 * TAU + PI / 4.0
+			var p0: Vector2 = pos + Vector2(cos(da), sin(da)) * hq_r
+			var p1: Vector2 = pos + Vector2(cos(da + TAU/8.0), sin(da + TAU/8.0)) * (hq_r - 3.5)
+			draw_line(p0, p1, Color(col.r * 0.7 + 0.3, col.g * 0.7 + 0.3, 0.2, hq_pulse), 1.5)
+		draw_arc(pos, hq_r, 0, TAU, 32, Color(col.r * 0.6 + 0.4, col.g * 0.6 + 0.4, 0.15, hq_pulse * 0.55), 1.0)
+		draw_string(ThemeDB.fallback_font, pos + Vector2(-9, -sz - 27),
+			"HQ", HORIZONTAL_ALIGNMENT_LEFT, 24, 10,
+			Color(col.r * 0.5 + 0.5, col.g * 0.5 + 0.5, 0.2, 0.9))
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		var mp := get_global_mouse_position()
@@ -241,11 +319,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		cam_pan += event.relative
 		queue_redraw()
 
+func _calc_jump(from_idx: int, to_idx: int) -> Dictionary:
+	var dist: float = SYSTEMS[from_idx]["pos"].distance_to(SYSTEMS[to_idx]["pos"])
+	var raw_cost := int(dist * JUMP_COST_PER_PX)
+	var cost: int  = maxi(JUMP_MIN_COST, (raw_cost / 50) * 50)
+	var days: int  = maxi(1, int(dist / JUMP_DAY_PX))
+	return {"cost": cost, "days": days, "dist": int(dist)}
+
 func _on_system_clicked(idx: int) -> void:
 	selected_idx = idx
 	var s = SYSTEMS[idx]
-	lbl_name.text   = s["name"]
-	lbl_faction.text = "Фракция: " + s["faction"]
+	var visited: bool = idx in GameManager.visited_systems
+	var name_txt: String = s["name"] if visited else "???"
+	lbl_name.text    = name_txt
+	lbl_faction.text = ("Фракция: " + s["faction"]) if visited else "Фракция: неизвестна"
 	var d: int = s["danger"]
 	lbl_danger.text = "Опасность: " + "★".repeat(d) + "☆".repeat(5-d)
 	var is_current := (idx == current_idx)
@@ -253,38 +340,89 @@ func _on_system_clicked(idx: int) -> void:
 	btn_jump.visible     = not is_current
 	lbl_jumpcost.visible = not is_current
 	if not is_current:
-		lbl_jumpcost.text = "Прыжок: %d кред. / %d день" % [JUMP_COST, JUMP_DAYS]
-		btn_jump.disabled = GameManager.credits < JUMP_COST
+		var jmp      := _calc_jump(current_idx, idx)
+		var fuel_need: float = float(jmp["dist"]) * FUEL_PER_PX
+		var days_txt: String = "%d день" % jmp["days"] if jmp["days"] == 1 else "%d дня" % jmp["days"]
+		var rep_txt: String  = ""
+		if visited:
+			var standing := GameManager.get_faction_standing(s["faction"])
+			rep_txt = "  |  %s: %s" % [s["faction"], standing]
+		lbl_jumpcost.text = "Прыжок: %d кред. / %s  |  Топливо: %.0f%%  (%d св. лет)%s" % [
+			jmp["cost"], days_txt, fuel_need, jmp["dist"], rep_txt]
+		var can_jump: bool = GameManager.credits >= jmp["cost"] and GameManager.fuel >= fuel_need
+		btn_jump.disabled = not can_jump
 	info_panel.show()
-	lbl_status.text = "%s  |  %s  |  Опасность %d/5" % [s["name"], s["faction"], d]
+	lbl_status.text = "%s  |  %s  |  Опасность %d/5  |  Топливо: %.0f/%.0f" % [
+		name_txt, (s["faction"] if visited else "???"), d, GameManager.fuel, GameManager.max_fuel]
 
 func _on_enter() -> void:
-	GameManager.current_galaxy     = SYSTEMS[current_idx]["name"]
+	var s: Dictionary = SYSTEMS[current_idx]
+	GameManager.current_galaxy     = s["name"]
 	GameManager.current_galaxy_idx = current_idx
-	GameManager.current_danger     = SYSTEMS[current_idx]["danger"]
+	GameManager.current_danger     = s["danger"]
+	GameManager.current_faction    = s["faction"]
+	if not current_idx in GameManager.visited_systems:
+		GameManager.visited_systems.append(current_idx)
+	GameManager.save_game()
 	get_tree().change_scene_to_file("res://scenes/star_system/StarSystemView.tscn")
 
 func _on_jump() -> void:
 	if selected_idx < 0 or selected_idx == current_idx:
 		return
-	if not GameManager.spend_credits(JUMP_COST):
+	var jmp: Dictionary = _calc_jump(current_idx, selected_idx)
+	var fuel_need: float = float(jmp["dist"]) * FUEL_PER_PX
+	if not GameManager.spend_credits(jmp["cost"]):
 		lbl_status.text = "❌ Недостаточно кредитов!"
 		return
-	var dest = SYSTEMS[selected_idx]
-	lbl_status.text = "⚡ Прыжок к %s..." % dest["name"]
+	if not GameManager.spend_fuel(fuel_need):
+		GameManager.add_credits(jmp["cost"])  # возврат
+		lbl_status.text = "⛽ Недостаточно топлива! (нужно %.0f%%, есть %.0f%%)" % [fuel_need, GameManager.fuel]
+		return
+
+	var dest: Dictionary = SYSTEMS[selected_idx]
+	var days_txt   := "%d день" % jmp["days"] if jmp["days"] == 1 else "%d дня" % jmp["days"]
+	lbl_status.text = "⚡ Прыжок к %s... (%s)" % [dest["name"], days_txt]
 	btn_jump.disabled = true
 	info_panel.hide()
+	AudioManager.play_sfx("jump")
+
+	# Анимация мерцающей точки
+	_travel_from   = SYSTEMS[current_idx]["pos"]
+	_travel_to     = SYSTEMS[selected_idx]["pos"]
+	_travel_t      = 0.0
+	_travel_active = true
+
+	var from_idx := current_idx
+	var to_idx   := selected_idx
 	var tween := create_tween()
-	tween.tween_interval(1.5)
+	tween.tween_interval(TRAVEL_DUR)
 	tween.tween_callback(func():
-		current_idx  = selected_idx
+		current_idx  = to_idx
 		selected_idx = -1
+		var s: Dictionary = SYSTEMS[current_idx]
 		GameManager.current_galaxy_idx = current_idx
-		GameManager.current_galaxy     = SYSTEMS[current_idx]["name"]
-		GameManager.current_danger     = SYSTEMS[current_idx]["danger"]
-		GameManager.advance_day()
+		GameManager.current_galaxy     = s["name"]
+		GameManager.current_danger     = s["danger"]
+		GameManager.current_faction    = s["faction"]
+		if not current_idx in GameManager.visited_systems:
+			GameManager.visited_systems.append(current_idx)
+		for _d in jmp["days"]:
+			GameManager.advance_day()
 		_refresh_topbar()
-		lbl_status.text = "✅ Прибыли: %s" % dest["name"]
+
+		# Случайная встреча в гиперпространстве
+		var encounter_chance: float = ENCOUNTER_BASE + float(s["danger"]) * ENCOUNTER_DANGER
+		if randf() < encounter_chance:
+			GameManager.pending_hyperspace_encounter = true
+			var hull_loss := randf_range(0.05, 0.15)
+			GameManager.ship_hull_pct = maxf(0.05, GameManager.ship_hull_pct - hull_loss)
+			AudioManager.play_sfx("hurt")
+			lbl_status.text = "⚠  ПЕРЕХВАТ В ГИПЕРПРОСТРАНСТВЕ!  −%.0f%% корпуса  →  Прибыли: %s" % [
+				hull_loss * 100, s["name"]]
+		else:
+			GameManager.pending_hyperspace_encounter = false
+			lbl_status.text = "✅ Прибыли: %s  (прошло %s)" % [s["name"], days_txt]
+		GameManager.save_game()
 	)
 
 func _refresh_topbar() -> void:

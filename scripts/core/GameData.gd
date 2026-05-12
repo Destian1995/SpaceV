@@ -62,28 +62,35 @@ const SHIPS := [
 ]
 
 const WEAPONS := [
-	{"name": "Лазерная пушка",    "price": 2000, "damage": 25,  "type": "energy",
+	# Лёгкое
+	{"name": "Импульсное орудие",      "price":  1800, "damage":  25, "type": "pulse",
+	 "desc": "Скорострельное лёгкое орудие. Небольшой урон, но высокий темп огня."},
+	# Среднее
+	{"name": "Лазерные пушки",         "price":  4500, "damage":  70, "type": "energy",
 	 "desc": "Стандартное энергетическое оружие. Надёжное и точное."},
-	{"name": "Ракетный launcher", "price": 3500, "damage": 60,  "type": "missile",
-	 "desc": "Высокий урон, ограниченный боезапас."},
-	{"name": "Плазменная турель", "price": 5500, "damage": 80,  "type": "plasma",
-	 "desc": "Мощное оружие, пробивает щиты врага."},
-	{"name": "ЭМИ дизраптор",    "price": 4000, "damage": 15,  "type": "emp",
-	 "desc": "Отключает системы врага. Ломает оборудование."},
-	{"name": "Рельсотрон",        "price": 7000, "damage": 120, "type": "kinetic",
-	 "desc": "Кинетическое орудие. Огромный урон, медленная перезарядка."},
-	{"name": "Импульсный бластер","price": 1200, "damage": 18,  "type": "energy",
-	 "desc": "Дешёвое и быстрострельное оружие начального уровня."},
+	{"name": "Электропушка",           "price":  6000, "damage": 110, "type": "emp",
+	 "desc": "Электромагнитный разряд. Выводит системы врага из строя."},
+	# Тяжёлое
+	{"name": "Турболазерные батареи",  "price":  9500, "damage": 155, "type": "turbolaser",
+	 "desc": "Двойной лазерный залп: выстреливает 2 снаряда одновременно."},
+	{"name": "Плазменные пушки",       "price": 11000, "damage": 160, "type": "plasma",
+	 "desc": "Плазменные сгустки пробивают щиты. Веер из 3 снарядов."},
+	{"name": "Торпеды Z-120",          "price": 15000, "damage": 200, "type": "torpedo",
+	 "desc": "Самонаводящиеся торпеды. Сокрушительный урон. Боезапас: 5 штук.", "ammo": 5},
+	# Сверхтяжёлое
+	{"name": "Рельсовая пушка",        "price": 22000, "damage": 700, "type": "railgun",
+	 "desc": "Кинетический снаряд с чудовищным уроном. 1 заряженный выстрел — один ответ."},
 ]
 
 # ── Weapon categories ────────────────────────────────────────────────────────
 const WEAPON_CATEGORY := {
-	"Импульсный бластер": "light",
-	"ЭМИ дизраптор":     "light",
-	"Лазерная пушка":    "medium",
-	"Ракетный launcher": "medium",
-	"Плазменная турель": "heavy",
-	"Рельсотрон":        "heavy",
+	"Импульсное орудие":     "light",
+	"Лазерные пушки":        "medium",
+	"Электропушка":          "medium",
+	"Турболазерные батареи": "heavy",
+	"Плазменные пушки":      "heavy",
+	"Торпеды Z-120":         "heavy",
+	"Рельсовая пушка":       "superheavy",
 }
 
 # ship_type → ship_class → {slots, cats}
@@ -99,9 +106,9 @@ const SHIP_WEAPON_RULES := {
 		"A": {"slots": 2, "cats": ["medium"]},
 	},
 	"Боевой": {
-		"C": {"slots": 4, "cats": ["light", "medium", "heavy"]},
-		"B": {"slots": 5, "cats": ["light", "medium", "heavy"]},
-		"A": {"slots": 7, "cats": ["light", "medium", "heavy"]},
+		"C": {"slots": 3, "cats": ["light", "medium", "heavy"]},
+		"B": {"slots": 4, "cats": ["light", "medium", "heavy"]},
+		"A": {"slots": 5, "cats": ["light", "medium", "heavy", "superheavy"]},
 	},
 	"Ресурсодобывающий": {
 		"C": {"slots": 1, "cats": ["light"]},
@@ -109,7 +116,7 @@ const SHIP_WEAPON_RULES := {
 		"A": {"slots": 3, "cats": ["light", "medium"]},
 	},
 	"Флагманский": {
-		"A": {"slots": 6, "cats": ["light", "medium", "heavy"]},
+		"A": {"slots": 6, "cats": ["light", "medium", "heavy", "superheavy"]},
 	},
 }
 
@@ -142,7 +149,7 @@ func can_equip_weapon(ship: Dictionary, weapon: Dictionary, equipped: Array) -> 
 	var allowed: Array = get_ship_allowed_cats(ship)
 	var cat: String = WEAPON_CATEGORY.get(weapon["name"], "medium")
 	if cat not in allowed:
-		var cat_ru := {"light": "лёгкое", "medium": "среднее", "heavy": "тяжёлое"}
+		var cat_ru := {"light": "лёгкое", "medium": "среднее", "heavy": "тяжёлое", "superheavy": "сверхтяжёлое"}
 		return "%s оружие нельзя на %s" % [cat_ru.get(cat, cat), ship.get("ship_type", "?")]
 	return ""
 
