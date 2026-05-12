@@ -76,14 +76,19 @@ func _ready() -> void:
 	GameManager.combat_result = ""
 	if result == "won":
 		var eid := GameManager.pending_enemy_id
+		# Запоминаем убитого врага чтобы не respawn'ить при перезагрузке сцены
+		if eid >= 0 and not GameManager.current_system_dead_enemies.has(eid):
+			GameManager.current_system_dead_enemies.append(eid)
 		for idx in range(enemies.size() - 1, -1, -1):
 			if enemies[idx].get("id", -2) == eid:
 				enemies.remove_at(idx)
 				break
 		_combat_triggered = true
-		lbl_status.text = "✅ Победа! Пират уничтожен."
-		if enemies.size() > 0:
-			lbl_status.text += "  Осталось врагов: %d" % enemies.size()
+		if enemies.is_empty():
+			lbl_status.text = "🏆 Все враги уничтожены! Космопорты системы открыты."
+		else:
+			lbl_status.text = "✅ Победа! Осталось врагов: %d — космопорты заблокированы." % enemies.size()
+		_refresh_planet_panel()
 		await get_tree().create_timer(4.0).timeout
 		_combat_triggered = false
 	elif result == "lost":
@@ -94,14 +99,11 @@ func _ready() -> void:
 		_combat_triggered = false
 	elif result == "retreat":
 		_combat_triggered = true
-		lbl_status.text = "🏃 Вы отступили. Враги всё ещё в системе!"
+		lbl_status.text = "🏃 Вы отступили. Враги всё ещё в системе! Космопорты заблокированы."
 		await get_tree().create_timer(5.0).timeout
 		_combat_triggered = false
 	else:
-		if enemies.is_empty():
-			lbl_status.text = "Нажмите на планету чтобы лететь к ней"
-		else:
-			lbl_status.text = "⚠️ Обнаружено враждебных судов: %d — будьте осторожны!" % enemies.size()
+		_update_status_label()
 
 func _gen_bg_stars() -> void:
 	var rng := RandomNumberGenerator.new()
@@ -184,27 +186,45 @@ func _gen_enemies() -> void:
 
 	var max_enemies := 3 + (danger / 2)
 	for i in max_enemies:
-		if rng.randf() > spawn_chance:
+		# Используем rng в том же порядке чтобы сохранить детерминизм расположения
+		var roll_r: float = rng.randf()
+		var angle:  float = rng.randf_range(0, TAU)
+		var dist:   float = rng.randf_range(160.0, 420.0)
+		var ang2:   float = rng.randf_range(0, TAU)
+		var pat_r:  float = rng.randf_range(50.0, 110.0)
+		var pat_a:  float = rng.randf_range(0, TAU)
+		var pat_s:  float = rng.randf_range(0.3, 0.7) * (1 if rng.randf() > 0.5 else -1)
+		var vari:   int   = rng.randi() % 3
+
+		# Пропускаем врагов убитых в этом посещении системы
+		if GameManager.current_system_dead_enemies.has(i):
 			continue
-		var angle: float = rng.randf_range(0, TAU)
-		var dist: float  = rng.randf_range(160.0, 420.0)
+		if roll_r > spawn_chance:
+			continue
+
 		var epos: Vector2 = STAR_POS + Vector2(cos(angle), sin(angle)) * dist
 		epos = epos.clamp(Vector2(40, 40), vp - Vector2(40, 40))
 		var hull_max: int = 60 + danger * 20
 		enemies.append({
-			"id":        i,
-			"pos":       epos,
-			"angle":     rng.randf_range(0, TAU),
+			"id":           i,
+			"pos":          epos,
+			"angle":        ang2,
 			"patrol_center": epos,
-			"patrol_r":  rng.randf_range(50.0, 110.0),
-			"patrol_angle": rng.randf_range(0, TAU),
-			"patrol_spd": rng.randf_range(0.3, 0.7) * (1 if rng.randf() > 0.5 else -1),
-			"state":     "patrol",   # patrol | chase | flee
-			"hull":      hull_max,
-			"hull_max":  hull_max,
-			"hit_flash": 0.0,
-			"variant":   rng.randi() % 3,  # 0=scout 1=fighter 2=heavy
+			"patrol_r":     pat_r,
+			"patrol_angle": pat_a,
+			"patrol_spd":   pat_s,
+			"state":        "patrol",   # patrol | chase | flee
+			"hull":         hull_max,
+			"hull_max":     hull_max,
+			"hit_flash":    0.0,
+			"variant":      vari,  # 0=scout 1=fighter 2=heavy
 		})
+
+func _update_status_label() -> void:
+	if enemies.is_empty():
+		lbl_status.text = "✅ Система чиста — нажмите на планету чтобы лететь к ней"
+	else:
+		lbl_status.text = "🔴 Враждебных судов: %d — космопорты ЗАБЛОКИРОВАНЫ! Уничтожьте их." % enemies.size()
 
 func _process(delta: float) -> void:
 	if spaceport_ui and spaceport_ui.visible:
@@ -304,15 +324,30 @@ func _check_proximity() -> void:
 func _refresh_planet_panel() -> void:
 	if near_idx >= 0:
 		var p = planets[near_idx]
-		lbl_pname.text  = p["name"]
-		lbl_ptype.text  = "Тип: " + p["type"]
-		lbl_port.text   = "✅ Космопорт" if p["has_spaceport"] else "❌ Нет космопорта"
-		lbl_port.modulate = Color.GREEN if p["has_spaceport"] else Color(1, 0.4, 0.4)
-		lbl_cargo.text  = "Груз: %d/%d" % [GameManager.cargo_capacity - GameManager.cargo_free(), GameManager.cargo_capacity]
-		btn_land.text   = "🛬 Войти в космопорт" if p["has_spaceport"] else "🔭 Исследовать (нет порта)"
-		btn_land.disabled = false
+		var blocked: bool = enemies.size() > 0
+		lbl_pname.text = p["name"]
+		lbl_ptype.text = "Тип: " + p["type"]
+		lbl_cargo.text = "Груз: %d/%d" % [GameManager.cargo_capacity - GameManager.cargo_free(), GameManager.cargo_capacity]
+		if blocked:
+			lbl_port.text     = "🔴 ЗАБЛОКИРОВАН — уничтожьте %d врагов!" % enemies.size()
+			lbl_port.modulate = Color(1.0, 0.3, 0.3)
+			btn_land.text     = "🔴 Заблокирован врагами"
+			btn_land.disabled = true
+		elif p["has_spaceport"]:
+			lbl_port.text     = "✅ Космопорт"
+			lbl_port.modulate = Color.GREEN
+			btn_land.text     = "🛬 Войти в космопорт"
+			btn_land.disabled = false
+		else:
+			lbl_port.text     = "❌ Нет космопорта"
+			lbl_port.modulate = Color(1.0, 0.5, 0.5)
+			btn_land.text     = "🔭 Исследовать (нет порта)"
+			btn_land.disabled = false
 		planet_panel.show()
-		lbl_status.text = "Рядом: %s" % p["name"]
+		if blocked:
+			lbl_status.text = "🔴 %s — враги в системе! Космопорт заблокирован." % p["name"]
+		else:
+			lbl_status.text = "Рядом: %s" % p["name"]
 	else:
 		planet_panel.hide()
 
@@ -370,6 +405,9 @@ func _enter_combat(enemy: Dictionary) -> void:
 
 func _on_land() -> void:
 	if near_idx < 0:
+		return
+	if enemies.size() > 0:
+		lbl_status.text = "🔴 Нельзя! Уничтожьте %d вражеских кораблей чтобы открыть доступ к космопорту." % enemies.size()
 		return
 	var p = planets[near_idx]
 	if p["has_spaceport"]:

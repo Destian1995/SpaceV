@@ -15,6 +15,7 @@ var _bar_list:     VBoxContainer
 var _bank_list:    VBoxContainer
 var _repair_list:    VBoxContainer
 var _upgrades_list:  VBoxContainer
+var _hq_list:        VBoxContainer
 
 func _ready() -> void:
 	layer = 10
@@ -77,6 +78,7 @@ func _build_ui() -> void:
 	_bank_list     = _make_scroll_tab(tabs, "🏦 Банк")
 	_repair_list   = _make_scroll_tab(tabs, "🔧 Ремонт")
 	_upgrades_list = _make_scroll_tab(tabs, "🔬 Улучшения")
+	_hq_list       = _make_scroll_tab(tabs, "🏛 Штаб")
 
 func _make_scroll_tab(tabs: TabContainer, tab_name: String) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
@@ -102,6 +104,7 @@ func open_spaceport(planet: Dictionary) -> void:
 	_populate_bank()
 	_populate_repair()
 	_populate_upgrades()
+	_populate_hq()
 	visible = true
 
 func _on_close() -> void:
@@ -284,8 +287,12 @@ func _buy_ship(s: Dictionary) -> void:
 		GameManager.cargo_capacity = s["cargo"]
 		GameManager.ship_upgrades.clear()   # улучшения привязаны к кораблю
 		GameManager.ship_hull_pct = 1.0     # новый корабль — целый корпус
+		GameManager.damaged_weapons.clear() # новый корабль — орудия целые
+		GameManager.weapon_ammo_state.clear()  # сбрасываем боезапас на дефолт
 		_populate_ships()
+		_populate_weapons()
 		_populate_upgrades()
+		_populate_repair()
 		_refresh_credits()
 		print("[Spaceport] Ship purchased: %s" % s["name"])
 
@@ -499,6 +506,8 @@ func _populate_factions() -> void:
 		btn.pressed.connect(func():
 			if GameManager.faction_join(f_cap):
 				_populate_bar()
+				_populate_ships()
+				_populate_hq()
 				_refresh_credits())
 		hb.add_child(btn)
 
@@ -527,6 +536,8 @@ func _populate_factions() -> void:
 		if fname.is_empty(): return
 		if GameManager.faction_create(fname):
 			_populate_bar()
+			_populate_ships()
+			_populate_hq()
 			_refresh_credits())
 	create_row.add_child(create_btn)
 
@@ -1051,6 +1062,146 @@ func _populate_repair() -> void:
 					_refresh_credits())
 			row.add_child(btn)
 
+	# ── Ремонт повреждённых орудийных отсеков ────────────────────────────────────
+	_repair_list.add_child(HSeparator.new())
+	_repair_list.add_child(_lbl("⚠  РЕМОНТ ОРУДИЙНЫХ ОТСЕКОВ", 18, Color(1.0, 0.55, 0.2)))
+
+	var damaged: Array = GameManager.damaged_weapons
+	if damaged.is_empty():
+		_repair_list.add_child(_lbl("✅  Все орудийные отсеки в норме.", 14, Color(0.3, 1.0, 0.5)))
+	else:
+		_repair_list.add_child(_lbl(
+			"Повреждённые орудия не стреляют до ремонта. Стоимость: 15%% цены орудия.",
+			13, Color(0.5, 0.55, 0.65)))
+		for slot_idx in damaged:
+			var wname: String = GameManager.equipped_weapons[slot_idx] \
+				if slot_idx < GameManager.equipped_weapons.size() else "Орудие %d" % slot_idx
+			# Find weapon price in GameData
+			var wprice: int = 5000
+			for wd in GameData.WEAPONS:
+				if wd["name"] == wname:
+					wprice = wd["price"]
+					break
+			var repair_cost: int = maxi(500, int(wprice * 0.15))
+			var r := HBoxContainer.new()
+			_repair_list.add_child(r)
+			var dl := _lbl("⚠  %s" % wname, 15, Color(1.0, 0.45, 0.3))
+			dl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			r.add_child(dl)
+			var cl := _lbl("%d кред." % repair_cost, 15, Color(1.0, 0.88, 0.3))
+			cl.custom_minimum_size = Vector2(120, 0)
+			cl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			r.add_child(cl)
+			var btn := Button.new()
+			btn.text = "Починить отсек"
+			btn.custom_minimum_size = Vector2(140, 0)
+			btn.disabled = GameManager.credits < repair_cost
+			var cap_slot: int  = slot_idx
+			var cap_cost2: int = repair_cost
+			btn.pressed.connect(func(): _do_weapon_repair(cap_slot, cap_cost2))
+			r.add_child(btn)
+
+		if damaged.size() > 1:
+			var all_cost: int = 0
+			for slot_idx2 in damaged:
+				var wn2: String = GameManager.equipped_weapons[slot_idx2] \
+					if slot_idx2 < GameManager.equipped_weapons.size() else ""
+				var wp2: int = 5000
+				for wd2 in GameData.WEAPONS:
+					if wd2["name"] == wn2: wp2 = wd2["price"]; break
+				all_cost += maxi(500, int(wp2 * 0.15))
+			var all_row := HBoxContainer.new()
+			_repair_list.add_child(all_row)
+			var all_desc := _lbl("🔧  Починить все орудия", 15)
+			all_desc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			all_row.add_child(all_desc)
+			var all_cl := _lbl("%d кред." % all_cost, 15, Color(1.0, 0.88, 0.3))
+			all_cl.custom_minimum_size = Vector2(120, 0)
+			all_cl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			all_row.add_child(all_cl)
+			var all_btn := Button.new()
+			all_btn.text = "Починить всё"
+			all_btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+			all_btn.custom_minimum_size = Vector2(140, 0)
+			all_btn.disabled = GameManager.credits < all_cost
+			var cap_all_cost: int = all_cost
+			all_btn.pressed.connect(func(): _do_all_weapon_repair(cap_all_cost))
+			all_row.add_child(all_btn)
+
+	# ── Пополнение боезапаса / батарей ───────────────────────────────────────────
+	_repair_list.add_child(HSeparator.new())
+	_repair_list.add_child(_lbl("🔋  ПОПОЛНЕНИЕ БОЕЗАПАСА", 18, Color(0.55, 0.85, 1.0)))
+
+	var has_any_ammo := false
+	for slot_i in GameManager.equipped_weapons.size():
+		var wname2: String = GameManager.equipped_weapons[slot_i]
+		var max_ammo: int  = 0
+		var wprice2:  int  = 1800
+		var wtype2:   String = "energy"
+		for wd3 in GameData.WEAPONS:
+			if wd3["name"] == wname2:
+				max_ammo = wd3.get("ammo", 0)
+				wprice2  = wd3["price"]
+				wtype2   = wd3.get("type", "energy")
+				break
+		if max_ammo <= 0: continue
+		has_any_ammo = true
+		var cur_ammo: int = int(GameManager.weapon_ammo_state.get(wname2, max_ammo))
+		if cur_ammo >= max_ammo:
+			var full_row := HBoxContainer.new()
+			_repair_list.add_child(full_row)
+			var icon: String = "🚀" if wtype2 == "torpedo" or wtype2 == "missile" else "🔋"
+			var fl := _lbl("%s  %s — %d/%d %s" % [
+				"✅", wname2, cur_ammo, max_ammo, icon], 14, Color(0.3, 1.0, 0.5))
+			fl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			full_row.add_child(fl)
+			continue
+		# Need restock
+		var missing_ammo: int = max_ammo - cur_ammo
+		var cost_per_unit: int = maxi(50, int(float(wprice2) / float(max_ammo) * 2.0))
+		var restock_cost:  int = missing_ammo * cost_per_unit
+		var icon2: String = "🚀" if wtype2 == "torpedo" or wtype2 == "missile" else "🔋"
+		var ar := HBoxContainer.new()
+		_repair_list.add_child(ar)
+		var ad := _lbl("%s  %s — %d/%d %s" % [
+			"⚠", wname2, cur_ammo, max_ammo, icon2], 15, Color(0.9, 0.65, 0.2))
+		ad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ar.add_child(ad)
+		var acl := _lbl("%d кред." % restock_cost, 15, Color(1.0, 0.88, 0.3))
+		acl.custom_minimum_size = Vector2(120, 0)
+		acl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		ar.add_child(acl)
+		var abtn := Button.new()
+		abtn.text = "Пополнить"
+		abtn.custom_minimum_size = Vector2(120, 0)
+		abtn.disabled = GameManager.credits < restock_cost
+		var cap_wname: String = wname2
+		var cap_max:   int    = max_ammo
+		var cap_rcost: int    = restock_cost
+		abtn.pressed.connect(func(): _do_restock_ammo(cap_wname, cap_max, cap_rcost))
+		ar.add_child(abtn)
+
+	if not has_any_ammo:
+		_repair_list.add_child(_lbl("На вашем корабле нет орудий с боезапасом.", 14, Color(0.5, 0.5, 0.55)))
+
+func _do_weapon_repair(slot_idx: int, cost: int) -> void:
+	if not GameManager.spend_credits(cost): return
+	GameManager.damaged_weapons.erase(slot_idx)
+	_populate_repair()
+	_refresh_credits()
+
+func _do_all_weapon_repair(total_cost: int) -> void:
+	if not GameManager.spend_credits(total_cost): return
+	GameManager.damaged_weapons.clear()
+	_populate_repair()
+	_refresh_credits()
+
+func _do_restock_ammo(wname: String, max_ammo: int, cost: int) -> void:
+	if not GameManager.spend_credits(cost): return
+	GameManager.weapon_ammo_state[wname] = max_ammo
+	_populate_repair()
+	_refresh_credits()
+
 func _do_repair(hp_amount: int, cost: int) -> void:
 	if not GameManager.spend_credits(cost):
 		return
@@ -1176,6 +1327,163 @@ func _buy_upgrade(uid: String, price: int) -> void:
 		GameManager.ship_upgrades.append(uid)
 		_populate_upgrades()
 		_refresh_credits()
+
+# ── Faction HQ ───────────────────────────────────────────────────────────────
+
+const HQ_ALLY_SHIPS := [
+	{"name": "Перехватчик", "icon": "✈", "cost": 8000,  "income": 120,
+	 "desc": "Лёгкий истребитель. Быстрый, небольшой доход."},
+	{"name": "Корвет",      "icon": "🚀", "cost": 18000, "income": 300,
+	 "desc": "Боевой корвет. Надёжный доход и хорошая боеспособность."},
+	{"name": "Крейсер",     "icon": "⚓", "cost": 40000, "income": 750,
+	 "desc": "Тяжёлый крейсер. Высокий доход, значительная боевая мощь."},
+	{"name": "Дредноут",    "icon": "💀", "cost": 90000, "income": 1800,
+	 "desc": "Линкор флота. Максимальный доход. Только для крупных фракций."},
+]
+
+const HQ_ALLY_NAMES := [
+	"Адмирал Кортос", "Капитан Зерра", "Лейтенант Вар", "Командор Нексус",
+	"Пилот Орион", "Майор Стрела", "Полковник Фокс", "Капитан Риф",
+	"Боец Астра", "Сержант Волк", "Агент Тень", "Пилот Зар",
+]
+
+func _populate_hq() -> void:
+	_clear(_hq_list)
+
+	if GameManager.faction_leader_of.is_empty():
+		_hq_list.add_child(_lbl("🏛  ШТАБ ФРАКЦИИ", 22, Color(0.7, 0.7, 0.7)))
+		_hq_list.add_child(HSeparator.new())
+		_hq_list.add_child(_lbl(
+			"Эта вкладка доступна только лидеру фракции.\nСоздайте свою фракцию в Баре, чтобы открыть Штаб.",
+			16, Color(0.55, 0.55, 0.6)))
+		return
+
+	var fname: String = GameManager.faction_leader_of
+	_hq_list.add_child(_lbl("🏛  ШТАБ ФРАКЦИИ «%s»" % fname.to_upper(), 22, Color(0.95, 0.82, 0.2)))
+	_hq_list.add_child(HSeparator.new())
+
+	# ── Overview ──
+	var allies: Array = GameManager.faction_allies
+	var total_income: int = 0
+	for a in allies:
+		total_income += int(a.get("income", 0))
+
+	var ov_hb := HBoxContainer.new()
+	_hq_list.add_child(ov_hb)
+
+	var ov_a := VBoxContainer.new()
+	ov_a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ov_hb.add_child(ov_a)
+	ov_a.add_child(_lbl("👥 Союзников:", 14, Color(0.5, 0.8, 1.0)))
+	ov_a.add_child(_lbl("%d человек" % allies.size(), 22, Color(0.3, 1.0, 0.55)))
+
+	var ov_i := VBoxContainer.new()
+	ov_i.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ov_hb.add_child(ov_i)
+	ov_i.add_child(_lbl("💰 Доход/день:", 14, Color(0.5, 0.8, 1.0)))
+	ov_i.add_child(_lbl("+%d кред." % total_income, 22, Color(0.95, 0.82, 0.2)))
+
+	var ov_r := VBoxContainer.new()
+	ov_r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ov_hb.add_child(ov_r)
+	ov_r.add_child(_lbl("⭐ Репутация:", 14, Color(0.5, 0.8, 1.0)))
+	var rep_val: int = GameManager.faction_reputation.get(fname, 0)
+	ov_r.add_child(_lbl("%d / 100" % rep_val, 22, Color(1.0, 0.6, 0.2)))
+
+	_hq_list.add_child(HSeparator.new())
+
+	# ── Recruit section ──
+	_hq_list.add_child(_lbl("⚔  НАБОР СОЮЗНИКОВ", 18, Color(0.55, 0.85, 1.0)))
+	_hq_list.add_child(_lbl(
+		"Каждый союзник получает корабль и приносит ежедневный доход. Доход начисляется при смене дня.",
+		13, Color(0.5, 0.55, 0.65)))
+	_hq_list.add_child(HSeparator.new())
+
+	for ship_data in HQ_ALLY_SHIPS:
+		var cost: int = ship_data["cost"]
+		var income: int = ship_data["income"]
+
+		var card := PanelContainer.new()
+		card.custom_minimum_size = Vector2(0, 80)
+		var hb := HBoxContainer.new()
+		card.add_child(hb)
+
+		var icon_l := _lbl(ship_data["icon"], 32)
+		icon_l.custom_minimum_size = Vector2(50, 0)
+		icon_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hb.add_child(icon_l)
+
+		var info_vb := VBoxContainer.new()
+		info_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb.add_child(info_vb)
+
+		info_vb.add_child(_lbl(ship_data["name"], 17))
+		info_vb.add_child(_lbl(ship_data["desc"], 13, Color(0.65, 0.65, 0.65)))
+		info_vb.add_child(_lbl("💰 Доход: +%d кред./день" % income, 13, Color(0.3, 1.0, 0.55)))
+
+		var buy_vb := VBoxContainer.new()
+		buy_vb.custom_minimum_size = Vector2(160, 0)
+		hb.add_child(buy_vb)
+
+		var price_l := _lbl("%d кред." % cost, 16, Color(1.0, 0.88, 0.3))
+		price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		buy_vb.add_child(price_l)
+
+		var recruit_btn := Button.new()
+		recruit_btn.text = "Завербовать"
+		recruit_btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+		recruit_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		recruit_btn.disabled = GameManager.credits < cost
+		var cap_cost: int  = cost
+		var cap_inc:  int  = income
+		var cap_ship: String = ship_data["name"]
+		recruit_btn.pressed.connect(func(): _hq_recruit(cap_cost, cap_inc, cap_ship))
+		buy_vb.add_child(recruit_btn)
+
+		_hq_list.add_child(card)
+
+	# ── Current roster ──
+	if allies.size() > 0:
+		_hq_list.add_child(HSeparator.new())
+		_hq_list.add_child(_lbl("👥  ТЕКУЩИЙ СОСТАВ", 18, Color(0.85, 0.65, 1.0)))
+		for ally in allies:
+			var r := HBoxContainer.new()
+			r.custom_minimum_size = Vector2(0, 40)
+			_hq_list.add_child(r)
+			r.add_child(_lbl(ally.get("icon", "✈"), 22))
+			var al := _lbl("  %s  —  %s" % [ally.get("name", "?"), ally.get("ship", "?")], 15)
+			al.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			r.add_child(al)
+			r.add_child(_lbl("+%d к./день" % int(ally.get("income", 0)), 14, Color(0.3, 1.0, 0.55)))
+
+			var dismiss_btn := Button.new()
+			dismiss_btn.text = "Уволить"
+			dismiss_btn.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
+			dismiss_btn.custom_minimum_size = Vector2(90, 0)
+			var cap_ally: Dictionary = ally
+			dismiss_btn.pressed.connect(func(): _hq_dismiss(cap_ally))
+			r.add_child(dismiss_btn)
+
+func _hq_recruit(cost: int, income: int, ship_name: String) -> void:
+	if not GameManager.spend_credits(cost):
+		return
+	var idx: int = GameManager.faction_allies.size() % HQ_ALLY_NAMES.size()
+	var ally_name: String = HQ_ALLY_NAMES[idx]
+	# Find ship icon
+	var icon := "✈"
+	for sd in HQ_ALLY_SHIPS:
+		if sd["name"] == ship_name:
+			icon = sd["icon"]
+			break
+	GameManager.faction_allies.append({
+		"name": ally_name, "ship": ship_name, "income": income, "icon": icon
+	})
+	_populate_hq()
+	_refresh_credits()
+
+func _hq_dismiss(ally: Dictionary) -> void:
+	GameManager.faction_allies.erase(ally)
+	_populate_hq()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

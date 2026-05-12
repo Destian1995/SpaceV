@@ -20,9 +20,37 @@ const SYSTEMS = [
 	{"name": "Void Station",   "pos": Vector2(860, 650), "faction": "Нет",         "danger": 5, "color": Color(0.4,  0.4,  0.65), "size": 9},
 	{"name": "Terminus",       "pos": Vector2(430, 650), "faction": "Пираты",      "danger": 4, "color": Color(1.0,  0.4,  0.2),  "size": 8},
 	{"name": "Darkfall",       "pos": Vector2(1060,580), "faction": "Нет",         "danger": 5, "color": Color(0.35, 0.35, 0.6),  "size": 8},
+	# ── Расширение: 20 новых систем ────────────────────────────────────────────
+	# Федерация (дальний рубеж)
+	{"name": "Pax Harbor",     "pos": Vector2(80,  260), "faction": "Федерация",   "danger": 1, "color": Color(0.4,  0.82, 1.0),  "size": 9},
+	{"name": "Crux Station",   "pos": Vector2(75,  460), "faction": "Федерация",   "danger": 2, "color": Color(0.35, 0.65, 0.95), "size": 8},
+	# Торговцы
+	{"name": "Silk Route",     "pos": Vector2(490,  90), "faction": "Торговцы",    "danger": 2, "color": Color(0.28, 0.95, 0.55), "size": 9},
+	{"name": "Drift Market",   "pos": Vector2(760, 105), "faction": "Торговцы",    "danger": 3, "color": Color(0.22, 0.82, 0.50), "size": 8},
+	# Независимые
+	{"name": "Echo Station",   "pos": Vector2(340, 130), "faction": "Независимые", "danger": 2, "color": Color(0.65, 0.90, 0.65), "size": 8},
+	{"name": "Relay Point",    "pos": Vector2(360, 285), "faction": "Независимые", "danger": 2, "color": Color(0.62, 0.85, 0.65), "size": 8},
+	{"name": "Hyperion Falls", "pos": Vector2(660, 162), "faction": "Независимые", "danger": 2, "color": Color(0.58, 0.90, 0.70), "size": 9},
+	{"name": "Forge Station",  "pos": Vector2(175, 490), "faction": "Независимые", "danger": 3, "color": Color(0.70, 0.55, 0.88), "size": 8},
+	{"name": "Binary Junction","pos": Vector2(750, 490), "faction": "Независимые", "danger": 3, "color": Color(0.55, 0.78, 0.55), "size": 8},
+	# Империя
+	{"name": "Kron Pass",      "pos": Vector2(905, 318), "faction": "Империя",     "danger": 3, "color": Color(0.95, 0.58, 0.18), "size": 8},
+	{"name": "Iron Throne",    "pos": Vector2(1115,202), "faction": "Империя",     "danger": 3, "color": Color(1.0,  0.60, 0.18), "size": 9},
+	{"name": "Citadel Prime",  "pos": Vector2(1130,405), "faction": "Империя",     "danger": 4, "color": Color(1.0,  0.48, 0.12), "size": 10, "is_hq": true},
+	# Пираты
+	{"name": "Skull Haven",    "pos": Vector2(680, 725), "faction": "Пираты",      "danger": 4, "color": Color(1.0,  0.28, 0.28), "size": 9},
+	{"name": "Rogue Station",  "pos": Vector2(285, 715), "faction": "Пираты",      "danger": 4, "color": Color(0.90, 0.22, 0.32), "size": 8},
+	{"name": "Crimson Expanse","pos": Vector2(1060,145), "faction": "Пираты",      "danger": 4, "color": Color(1.0,  0.22, 0.22), "size": 9},
+	# Пустота / Неизвестное
+	{"name": "Derelict Nexus", "pos": Vector2(510, 780), "faction": "Нет",         "danger": 5, "color": Color(0.45, 0.45, 0.70), "size": 8},
+	{"name": "Abyss Gate",     "pos": Vector2(1135,645), "faction": "Нет",         "danger": 5, "color": Color(0.38, 0.38, 0.62), "size": 9},
+	{"name": "Shadowrift",     "pos": Vector2(120, 740), "faction": "Нет",         "danger": 5, "color": Color(0.35, 0.35, 0.60), "size": 8},
+	{"name": "Wanderer's End", "pos": Vector2(1205,495), "faction": "Нет",         "danger": 5, "color": Color(0.40, 0.40, 0.65), "size": 8},
+	{"name": "Nebula Shrine",  "pos": Vector2(870, 738), "faction": "Нет",         "danger": 5, "color": Color(0.48, 0.40, 0.70), "size": 9},
 ]
 
 const CONNECTIONS = [
+	# Оригинальные связи (0–15)
 	[0,1],[0,2],[0,3],[0,4],[0,8],[0,9],
 	[1,2],[1,6],[1,7],[1,9],
 	[2,3],[2,8],
@@ -37,6 +65,47 @@ const CONNECTIONS = [
 	[11,14],[11,13],
 	[12,14],
 	[13,15],
+	# Новые связи (16–35)
+	# Pax Harbor(16)
+	[16,0],[16,3],[16,17],[16,21],
+	# Crux Station(17)
+	[17,16],[17,3],[17,23],[17,33],
+	# Silk Route(18)
+	[18,2],[18,6],[18,20],[18,22],
+	# Drift Market(19)
+	[19,6],[19,1],[19,22],[19,26],
+	# Echo Station(20)
+	[20,2],[20,18],[20,21],
+	# Relay Point(21)
+	[21,0],[21,8],[21,20],[21,16],
+	# Hyperion Falls(22)
+	[22,6],[22,18],[22,19],[22,25],
+	# Forge Station(23)
+	[23,3],[23,4],[23,17],[23,29],
+	# Binary Junction(24)
+	[24,9],[24,5],[24,28],[24,25],
+	# Kron Pass(25)
+	[25,7],[25,9],[25,24],[25,26],
+	# Iron Throne(26)
+	[26,7],[26,19],[26,27],[26,30],
+	# Citadel Prime(27)
+	[27,26],[27,10],[27,32],[27,34],
+	# Skull Haven(28)
+	[28,14],[28,11],[28,24],[28,31],
+	# Rogue Station(29)
+	[29,12],[29,14],[29,23],[29,33],
+	# Crimson Expanse(30)
+	[30,7],[30,10],[30,26],
+	# Derelict Nexus(31)
+	[31,11],[31,14],[31,28],[31,35],
+	# Abyss Gate(32)
+	[32,13],[32,15],[32,27],[32,34],
+	# Shadowrift(33)
+	[33,12],[33,29],[33,17],
+	# Wanderer's End(34)
+	[34,15],[34,32],[34,27],
+	# Nebula Shrine(35)
+	[35,13],[35,28],[35,32],
 ]
 
 # Стоимость и время прыжка рассчитываются динамически по расстоянию
@@ -363,6 +432,7 @@ func _on_enter() -> void:
 	GameManager.current_faction    = s["faction"]
 	if not current_idx in GameManager.visited_systems:
 		GameManager.visited_systems.append(current_idx)
+	GameManager.current_system_dead_enemies.clear()  # новая система — враги сбрасываются
 	GameManager.save_game()
 	get_tree().change_scene_to_file("res://scenes/star_system/StarSystemView.tscn")
 
@@ -406,6 +476,7 @@ func _on_jump() -> void:
 		GameManager.current_faction    = s["faction"]
 		if not current_idx in GameManager.visited_systems:
 			GameManager.visited_systems.append(current_idx)
+		GameManager.current_system_dead_enemies.clear()  # новая система — враги сбрасываются
 		for _d in jmp["days"]:
 			GameManager.advance_day()
 		_refresh_topbar()

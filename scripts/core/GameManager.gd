@@ -19,6 +19,8 @@ var current_ship: Dictionary = {
 }
 var faction_leader_of: String = ""  # название фракции если игрок лидер
 var player_faction:    String = ""  # фракция к которой принадлежит игрок ("" = без фракции)
+# Союзники фракции: массив словарей {name, ship, income, level}
+var faction_allies: Array = []
 var equipped_weapons: Array = []
 
 # Cargo hold
@@ -45,6 +47,13 @@ var ship_hull_pct: float = 1.0       # текущий корпус как дол
 
 # Ship upgrades (array of upgrade IDs, e.g. ["volley", "boost"])
 var ship_upgrades: Array = []
+
+# Weapon damage / ammo persistence between combats
+var damaged_weapons:    Array      = []   # slot indices that are damaged
+var weapon_ammo_state:  Dictionary = {}   # weapon_name -> ammo_remaining
+
+# Враги уничтоженные в текущей системе (сбрасывается при смене системы)
+var current_system_dead_enemies: Array = []   # list of enemy IDs killed this visit
 
 # ── Боевая статистика (накопительно, личное дело) ─────────────────────────────
 var total_damage_dealt:    int = 0
@@ -106,6 +115,15 @@ func advance_day() -> void:
 		var interest := int(bank_balance * BANK_DEPOSIT_RATE)
 		bank_balance += interest
 		print("[Bank] Начислено %d кред. (4%% за день %d)" % [interest, day])
+	# Доход от союзников фракции
+	if faction_allies.size() > 0:
+		var ally_income := 0
+		for ally in faction_allies:
+			ally_income += int(ally.get("income", 0))
+		if ally_income > 0:
+			credits += ally_income
+			credits_changed.emit(credits)
+			print("[Faction] Союзники принесли %d кред. за день %d" % [ally_income, day])
 	print("[GameManager] Day %d" % day)
 
 func add_cargo(item: String, qty: int) -> bool:
@@ -257,10 +275,13 @@ func save_game() -> void:
 		"bank_balance": bank_balance, "loan_amount": loan_amount,
 		"ship_hull_pct": ship_hull_pct,
 		"ship_upgrades": ship_upgrades,
+		"damaged_weapons": damaged_weapons,
+		"weapon_ammo_state": weapon_ammo_state,
 		"faction_reputation": faction_reputation,
 		"visited_systems": visited_systems,
 		"player_faction": player_faction,
 		"faction_leader_of": faction_leader_of,
+		"faction_allies": faction_allies,
 		"fuel": fuel, "max_fuel": max_fuel,
 		"total_damage_dealt":    total_damage_dealt,
 		"total_damage_absorbed": total_damage_absorbed,
@@ -295,10 +316,13 @@ func load_game() -> bool:
 	loan_amount          = int(data.get("loan_amount",       0))
 	ship_hull_pct        = float(data.get("ship_hull_pct",   1.0))
 	ship_upgrades        = data.get("ship_upgrades",         [])
+	damaged_weapons      = data.get("damaged_weapons",       [])
+	weapon_ammo_state    = data.get("weapon_ammo_state",     {})
 	faction_reputation   = data.get("faction_reputation",    faction_reputation)
 	visited_systems      = data.get("visited_systems",       [0])
 	player_faction       = str(data.get("player_faction",    ""))
 	faction_leader_of    = str(data.get("faction_leader_of", ""))
+	faction_allies       = data.get("faction_allies",        [])
 	fuel                 = float(data.get("fuel",            100.0))
 	max_fuel             = float(data.get("max_fuel",        100.0))
 	total_damage_dealt   = int(data.get("total_damage_dealt",    0))
