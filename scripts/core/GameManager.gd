@@ -31,6 +31,7 @@ var equipped_weapons: Array = []
 # Cargo hold
 var cargo: Dictionary = {}  # item_name -> quantity
 var cargo_capacity: int = 50
+var cargo_avg_price: Dictionary = {}  # item_name -> средняя цена покупки
 
 # Quests
 var active_quests: Array = []
@@ -60,6 +61,9 @@ var weapon_ammo_state:  Dictionary = {}   # weapon_name -> ammo_remaining
 # Враги уничтоженные в текущей системе (сбрасывается при смене системы)
 var current_system_dead_enemies: Array = []   # list of enemy IDs killed this visit
 
+# ── Модификатор от космических явлений (сбрасывается при каждом прыжке) ──────
+var weapon_cooldown_modifier: float = 1.0    # 1.0 = норма, >1 = замедление (магнетар)
+
 # ── Боевая статистика (накопительно, личное дело) ─────────────────────────────
 var total_damage_dealt:    int = 0
 var total_damage_absorbed: int = 0
@@ -78,6 +82,8 @@ var faction_reputation: Dictionary = {
 
 # ── Туман войны — посещённые системы (индексы) ────────────────────────────────
 var visited_systems: Array = [0]    # Sol Prime открыта с самого начала
+# Системы, открытые через задания (имена строкой)
+var quest_revealed_systems: Array = []
 
 # ── Текущая фракция системы ────────────────────────────────────────────────────
 var current_faction: String = "Федерация"
@@ -387,6 +393,7 @@ func save_game() -> void:
 		"equipped_weapons": equipped_weapons,
 		"cargo": cargo,
 		"cargo_capacity": cargo_capacity,
+		"cargo_avg_price": cargo_avg_price,
 		"bank_balance": bank_balance, "loan_amount": loan_amount,
 		"ship_hull_pct": ship_hull_pct,
 		"ship_upgrades": ship_upgrades,
@@ -394,6 +401,7 @@ func save_game() -> void:
 		"weapon_ammo_state": weapon_ammo_state,
 		"faction_reputation": faction_reputation,
 		"visited_systems": visited_systems,
+		"quest_revealed_systems": quest_revealed_systems,
 		"player_faction": player_faction,
 		"faction_leader_of": faction_leader_of,
 		"faction_hq_system": faction_hq_system,
@@ -432,6 +440,7 @@ func load_game() -> bool:
 	equipped_weapons     = data.get("equipped_weapons",      [])
 	cargo                = data.get("cargo",                 {})
 	cargo_capacity       = int(data.get("cargo_capacity",    50))
+	cargo_avg_price      = data.get("cargo_avg_price",       {})
 	bank_balance         = int(data.get("bank_balance",      0))
 	loan_amount          = int(data.get("loan_amount",       0))
 	ship_hull_pct        = float(data.get("ship_hull_pct",   1.0))
@@ -439,7 +448,8 @@ func load_game() -> bool:
 	damaged_weapons      = data.get("damaged_weapons",       [])
 	weapon_ammo_state    = data.get("weapon_ammo_state",     {})
 	faction_reputation   = data.get("faction_reputation",    faction_reputation)
-	visited_systems      = data.get("visited_systems",       [0])
+	visited_systems          = data.get("visited_systems",          [0])
+	quest_revealed_systems   = data.get("quest_revealed_systems",   [])
 	player_faction       = str(data.get("player_faction",    ""))
 	faction_leader_of    = str(data.get("faction_leader_of", ""))
 	faction_hq_system      = str(data.get("faction_hq_system", ""))

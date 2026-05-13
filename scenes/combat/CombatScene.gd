@@ -20,10 +20,11 @@ const WEAPON_STATS := {
 	"emp":        {"accuracy": 0.85, "cooldown": 0.52, "miss_spread": 0.38},  # электропушка
 	"turbolaser": {"accuracy": 0.80, "cooldown": 0.55, "miss_spread": 0.44},  # двойной залп
 	"plasma":     {"accuracy": 0.62, "cooldown": 0.78, "miss_spread": 0.70},  # веер x3
-	"torpedo":    {"accuracy": 0.96, "cooldown": 2.20, "miss_spread": 0.15},  # самонаведение, 5 шт
-	"missile":    {"accuracy": 0.92, "cooldown": 1.50, "miss_spread": 0.22},
-	"kinetic":    {"accuracy": 0.52, "cooldown": 2.00, "miss_spread": 0.90},
-	"railgun":    {"accuracy": 0.88, "cooldown": 3.80, "miss_spread": 0.28},  # сверхтяжёлое
+	"torpedo":       {"accuracy": 0.96, "cooldown": 2.20, "miss_spread": 0.15},  # залп всем боезапасом
+	"torpedo_heavy": {"accuracy": 0.97, "cooldown": 3.50, "miss_spread": 0.10},  # залп всем боезапасом
+	"missile":       {"accuracy": 0.92, "cooldown": 1.50, "miss_spread": 0.22},
+	"kinetic":       {"accuracy": 0.52, "cooldown": 2.00, "miss_spread": 0.90},
+	"railgun":       {"accuracy": 0.88, "cooldown": 3.80, "miss_spread": 0.28},  # сверхтяжёлое
 }
 
 # ── Variant definitions ───────────────────────────────────────────────────────
@@ -580,9 +581,23 @@ func _handle_auto_fire(delta: float) -> void:
 				projectiles.append(_make_proj(player_pos + fwd * 28, aim + sp + sp_off,
 					dmg, "plasma", false, target_enemy_idx))
 		"torpedo":
-			_status_lbl.text = "🚀  Торпеда выпущена!"
-			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset * 0.2,
-				w["damage"] * dmg_mult, "missile", true, target_enemy_idx))
+			# Залп — все оставшиеся торпеды сразу, по одной на цель
+			var tcount: int = maxi(1, int(w.get("ammo_left", 1)))
+			_status_lbl.text = "🚀  ТОРПЕДНЫЙ ЗАЛП — %d торпед!" % tcount
+			for ti in tcount:
+				var spread := (float(ti) - float(tcount - 1) * 0.5) * 0.08
+				projectiles.append(_make_proj(player_pos + fwd * 28, aim + spread,
+					w["damage"] * dmg_mult, "missile", true, target_enemy_idx))
+			w["ammo_left"] = 0
+		"torpedo_heavy":
+			# Залп — все оставшиеся тяжёлые торпеды сразу
+			var tcount: int = maxi(1, int(w.get("ammo_left", 1)))
+			_status_lbl.text = "💥  ЗАЛП Z-240 — %d торпеды! СОКРУШИТЕЛЬНЫЙ УДАР!" % tcount
+			for ti in tcount:
+				var spread := (float(ti) - float(tcount - 1) * 0.5) * 0.07
+				projectiles.append(_make_proj(player_pos + fwd * 30, aim + spread,
+					w["damage"] * dmg_mult, "missile", true, target_enemy_idx))
+			w["ammo_left"] = 0
 		"missile":
 			projectiles.append(_make_proj(player_pos + fwd * 28, aim + offset * 0.3,
 				w["damage"] * dmg_mult, "missile", true, target_enemy_idx))
@@ -600,8 +615,8 @@ func _handle_auto_fire(delta: float) -> void:
 
 	weapon_cooldowns[w["name"]] = wcd
 	auto_fire_timer = wcd
-	# Расход боезапаса (универсально для всех орудий)
-	if w.has("ammo_left"):
+	# Расход боезапаса — торпеды уже списаны в залпе выше
+	if w.has("ammo_left") and wtype != "torpedo" and wtype != "torpedo_heavy":
 		w["ammo_left"] = maxi(0, int(w["ammo_left"]) - 1)
 	_create_muzzle_flash(player_pos + fwd * 24, Color(0.3, 0.85, 1.0))
 	AudioManager.play_sfx("laser")
@@ -609,7 +624,8 @@ func _handle_auto_fire(delta: float) -> void:
 func _make_proj(pos: Vector2, angle: float, dmg: int, typ: String,
 				is_m: bool, target_idx: int = -1) -> Dictionary:
 	return {"pos": pos, "angle": angle, "damage": dmg, "type": typ,
-			"is_missile": is_m, "target_idx": target_idx}
+			"is_missile": is_m, "target_idx": target_idx,
+			"trail": [] if is_m else null}
 
 # ── Enemy fire ────────────────────────────────────────────────────────────────
 
@@ -894,6 +910,11 @@ func _update_projectiles(delta: float) -> void:
 				var des  := atan2((tpos - p["pos"]).x, -(tpos - p["pos"]).y)
 				p["angle"] = lerp_angle(p["angle"], des, MISSILE_TURN_SPEED * delta)
 				fwd = Vector2(sin(p["angle"]), -cos(p["angle"]))
+			# Обновляем шлейф
+			if p["trail"] != null:
+				(p["trail"] as Array).append(Vector2(p["pos"]))
+				if (p["trail"] as Array).size() > 22:
+					(p["trail"] as Array).remove_at(0)
 
 		p["pos"] += fwd * (MISSILE_SPEED if p["is_missile"] else LASER_SPEED) * delta
 
@@ -1276,9 +1297,26 @@ func _draw_ship_shadow(pos: Vector2, _scale_f: float) -> void:
 func _draw_projectile(p: Dictionary, fwd: Vector2, enemy: bool) -> void:
 	match p["type"]:
 		"missile":
-			var mc := Color(1.0, 0.52, 0.18) if not enemy else Color(0.9, 0.25, 0.10)
-			draw_circle(p["pos"], 5.5, mc)
-			draw_line(p["pos"], p["pos"] - fwd * 14, Color(mc.r, mc.g, mc.b, 0.65), 2.5)
+			var mc   := Color(1.0, 0.62, 0.18) if not enemy else Color(0.95, 0.22, 0.10)
+			var core := Color(1.0, 0.92, 0.70) if not enemy else Color(1.0, 0.65, 0.50)
+			# Шлейф — фading точки по траектории
+			var trail: Array = p.get("trail", []) as Array
+			var tsize := trail.size()
+			for ti in tsize:
+				var alpha := float(ti + 1) / float(tsize + 1)
+				var tr    := 4.5 * alpha
+				var tc    := Color(mc.r, mc.g * (0.5 + alpha * 0.5), mc.b * alpha * 0.4,
+								   alpha * 0.75)
+				draw_circle(trail[ti] as Vector2, tr, tc)
+			# Внешнее свечение
+			draw_circle(p["pos"], 10.0, Color(mc.r, mc.g, mc.b, 0.12))
+			draw_circle(p["pos"], 7.0,  Color(mc.r, mc.g, mc.b, 0.28))
+			# Корпус торпеды
+			draw_circle(p["pos"], 5.0, mc)
+			draw_circle(p["pos"], 2.8, core)
+			# Двигатель сзади
+			draw_circle(p["pos"] - fwd * 5.5, 3.5, Color(1.0, 0.75, 0.3, 0.90))
+			draw_circle(p["pos"] - fwd * 8.0, 2.0, Color(1.0, 1.0, 0.8, 0.70))
 		"plasma":
 			var pc := Color(0.55, 0.12, 1.00) if not enemy else Color(0.82, 0.08, 0.82)
 			draw_circle(p["pos"], 5.5, Color(pc.r, pc.g, pc.b, 0.95))
@@ -1485,7 +1523,8 @@ func _draw_weapon_hardpoints(pos: Vector2, angle: float) -> void:
 				"plasma":              wc = Color(1.0,  0.55, 0.15, 0.90)
 				"emp":                 wc = Color(0.25, 0.95, 0.85, 0.90)
 				"kinetic", "railgun":  wc = Color(0.85, 0.85, 0.85, 0.90)
-				"torpedo", "missile":  wc = Color(1.0,  0.85, 0.10, 0.90)
+				"torpedo", "missile":        wc = Color(1.0,  0.85, 0.10, 0.90)
+				"torpedo_heavy":             wc = Color(1.0,  0.42, 0.08, 0.95)
 				"turbolaser":          wc = Color(0.45, 0.75, 1.0,  0.90)
 				"pulse":               wc = Color(0.55, 1.0,  0.55, 0.90)
 			draw_circle(hp, HARDPOINT_DOT_R + 1.5, Color(wc.r * 0.3, wc.g * 0.3, wc.b * 0.3, 0.50))
@@ -1660,7 +1699,7 @@ func _draw_hud(vp: Vector2, arena: float) -> void:
 				wcol = Color(0.9, 0.4, 0.1)
 			else:
 				var wt: String = w.get("type", "energy")
-				var icon: String = "🚀" if wt == "torpedo" or wt == "missile" else "🔋"
+				var icon: String = "💥" if wt == "torpedo_heavy" else ("🚀" if wt == "torpedo" or wt == "missile" else "🔋")
 				ammo_txt = "  [%d%s]" % [al, icon]
 		draw_string(font, Vector2(pad, wy),
 			("▶ " if sel else "  ") + w["name"] + ammo_txt + ("  ГОТОВО" if (ready and not is_dmg) else ("" if is_dmg else "  %.1fs" % cd)),

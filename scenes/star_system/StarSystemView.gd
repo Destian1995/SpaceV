@@ -31,6 +31,12 @@ var _conquest_panel          = null
 var cam_pan:    Vector2 = Vector2.ZERO
 var _dragging:  bool    = false
 
+# Free flight
+var free_target_pos: Vector2 = Vector2.ZERO
+var free_moving:     bool    = false
+var _drag_moved:     bool    = false
+var _click_consumed: bool    = false
+
 const ENEMY_CHASE_RANGE   := 180.0
 const ENEMY_ATTACK_RANGE  := 60.0
 const ENEMY_SPEED         := 85.0
@@ -640,15 +646,23 @@ func _update_orbits(delta: float) -> void:
 		p["pos"] = STAR_POS + Vector2(cos(p["orbit_angle"]), sin(p["orbit_angle"])) * p["orbit_radius"]
 
 func _move_ship(delta: float) -> void:
-	if not ship_moving or target_idx < 0:
+	if ship_moving and target_idx >= 0:
+		var target: Vector2 = planets[target_idx]["pos"]
+		var dir: Vector2 = target - ship_pos
+		if dir.length() < LAND_DISTANCE * 0.7:
+			ship_moving = false
+		else:
+			ship_pos  += dir.normalized() * SHIP_SPEED * delta
+			ship_angle = atan2(dir.y, dir.x) + PI / 2.0
 		return
-	var target: Vector2 = planets[target_idx]["pos"]
-	var dir: Vector2 = target - ship_pos
-	if dir.length() < LAND_DISTANCE * 0.7:
-		ship_moving = false
-	else:
-		ship_pos  += dir.normalized() * SHIP_SPEED * delta
-		ship_angle = atan2(dir.y, dir.x) + PI / 2.0
+	if free_moving:
+		var dir: Vector2 = free_target_pos - ship_pos
+		if dir.length() < 10.0:
+			free_moving = false
+			_update_status_label()
+		else:
+			ship_pos  += dir.normalized() * SHIP_SPEED * delta
+			ship_angle = atan2(dir.y, dir.x) + PI / 2.0
 
 func _check_proximity() -> void:
 	var prev: int = near_idx
@@ -712,25 +726,33 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		var mp := get_global_mouse_position()
 		if event.pressed:
+			_drag_moved     = false
+			_click_consumed = false
 			# Check enemy ship click — player initiates attack
 			for e in enemies:
 				var e_screen: Vector2 = e["pos"] + cam_pan
 				var e_sz: float = 13.0 if e["variant"] == 0 else (17.0 if e["variant"] == 1 else 22.0)
 				if mp.distance_to(e_screen) < e_sz + 14:
 					_attack_enemy(e)
+					_click_consumed = true
 					return
 			# Check planet click (account for cam_pan)
 			for i in planets.size():
 				var p = planets[i]
 				if mp.distance_to(p["pos"] + cam_pan) < p["size"] + 12:
 					_fly_to(i)
+					_click_consumed = true
 					return
-			# Start drag
+			# Potential drag start
 			_dragging = true
 		else:
 			_dragging = false
+			# Short click on empty space → free fly
+			if not _drag_moved and not _click_consumed:
+				_fly_to_pos(get_global_mouse_position() - cam_pan)
 
 	if event is InputEventMouseMotion and _dragging:
+		_drag_moved = true
 		cam_pan += event.relative
 		queue_redraw()
 		return
@@ -738,7 +760,15 @@ func _unhandled_input(event: InputEvent) -> void:
 func _fly_to(idx: int) -> void:
 	target_idx   = idx
 	ship_moving  = true
+	free_moving  = false
 	lbl_status.text = "⚡ Курс на %s..." % planets[idx]["name"]
+
+func _fly_to_pos(pos: Vector2) -> void:
+	free_target_pos = pos
+	free_moving     = true
+	target_idx      = -1
+	ship_moving     = false
+	lbl_status.text = "⚡ Свободный курс..."
 
 func _attack_enemy(enemy: Dictionary) -> void:
 	if _combat_triggered:
@@ -767,7 +797,26 @@ func _on_land() -> void:
 	if p["has_spaceport"]:
 		spaceport_ui.open_spaceport(p)
 	else:
-		lbl_status.text = "Планета %s необитаема. Ресурсов не обнаружено." % p["name"]
+		var ptype: String = p.get("type", "")
+		var res_names: Array = []
+		if "Вулкан" in ptype:
+			res_names = ["Руда", "Металлы"]
+		elif "Ледяная" in ptype or "Снеж" in ptype:
+			res_names = ["Топливо", "Руда"]
+		elif "Газ" in ptype:
+			res_names = ["Топливо"]
+		elif "Каменист" in ptype:
+			res_names = ["Руда", "Металлы"]
+		elif "Пустын" in ptype:
+			res_names = ["Руда"]
+		elif "Океан" in ptype:
+			res_names = ["Медикаменты", "Еда"]
+		elif "Джунг" in ptype:
+			res_names = ["Еда", "Медикаменты"]
+		else:
+			res_names = ["Руда"]
+		lbl_status.text = "🔭 %s — обнаружены ресурсы: %s. Нужен Ресурсодобывающий корабль для добычи." % [
+			p["name"], ", ".join(res_names)]
 
 func _draw() -> void:
 	var vp := get_viewport_rect().size
@@ -817,6 +866,17 @@ func _draw() -> void:
 		var arr: Vector2 = td - dir * 28
 		draw_line(arr, arr + dir.rotated(2.4) * 10, Color(0.4, 0.8, 1.0, 0.7), 1.5)
 		draw_line(arr, arr + dir.rotated(-2.4) * 10, Color(0.4, 0.8, 1.0, 0.7), 1.5)
+
+	# ── Free flight waypoint ─────────────────────────────────────────────────
+	if free_moving:
+		var pulse: float = 0.5 + sin(time_e * 4.5) * 0.38
+		var wpt: Vector2 = free_target_pos
+		draw_dashed_line(ship_pos, wpt, Color(0.3, 0.85, 0.45, 0.28), 1.5, 10.0)
+		draw_circle(wpt, 10.0, Color(0.25, 0.85, 0.45, pulse * 0.18))
+		draw_circle(wpt,  4.5, Color(0.40, 1.00, 0.55, pulse * 0.65))
+		draw_circle(wpt,  2.0, Color(1.00, 1.00, 1.00, pulse))
+		draw_line(wpt - Vector2(14, 0), wpt + Vector2(14, 0), Color(0.35, 1.0, 0.5, pulse * 0.6), 1.0)
+		draw_line(wpt - Vector2(0, 14), wpt + Vector2(0, 14), Color(0.35, 1.0, 0.5, pulse * 0.6), 1.0)
 
 	# ── Союзные корабли штаба ───────────────────────────────────────────────────
 	for f in friendly_ships:

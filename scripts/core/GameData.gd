@@ -17,99 +17,101 @@ const GOODS := {
 const SHIPS := [
 	# ── Исследовательский ─────────────────────────────────────────────
 	{"name": "Пионер-А",        "ship_type": "Исследовательский", "ship_class": "A",
-	 "price": 45000, "speed": 310, "cargo": 60,  "hull": 280, "shields": 90,  "sensors": 95,
+	 "price": 67500, "speed": 310, "cargo": 60,  "hull": 280, "shields": 90,  "sensors": 95,
 	 "desc": "Элитный исследователь. Лучшие сенсоры класса, дальний прыжок, хорошая автономность."},
 	{"name": "Скаут-Б",         "ship_type": "Исследовательский", "ship_class": "B",
-	 "price": 22000, "speed": 270, "cargo": 40,  "hull": 200, "shields": 65,  "sensors": 75,
+	 "price": 33000, "speed": 270, "cargo": 40,  "hull": 200, "shields": 65,  "sensors": 75,
 	 "desc": "Надёжный разведчик среднего класса. Хорошая скорость, средние сенсоры."},
 	{"name": "Зонд-С",          "ship_type": "Исследовательский", "ship_class": "C",
-	 "price":  8000, "speed": 220, "cargo": 20,  "hull": 150, "shields": 40,  "sensors": 55,
+	 "price": 12000, "speed": 220, "cargo": 20,  "hull": 150, "shields": 40,  "sensors": 55,
 	 "desc": "Бюджетный разведчик. Слабое оборудование, но доступная цена."},
 	# ── Грузовой ──────────────────────────────────────────────────────
 	{"name": "Левиафан-А",      "ship_type": "Грузовой", "ship_class": "A",
-	 "price": 58000, "speed": 130, "cargo": 400, "hull": 500, "shields": 70,  "sensors": 45,
+	 "price": 87000, "speed": 130, "cargo": 400, "hull": 500, "shields": 70,  "sensors": 45,
 	 "desc": "Огромный грузовик класса А. Максимальная вместимость трюма."},
 	{"name": "Фрейтер-Б",       "ship_type": "Грузовой", "ship_class": "B",
-	 "price": 24000, "speed": 160, "cargo": 220, "hull": 380, "shields": 50,  "sensors": 35,
+	 "price": 36000, "speed": 160, "cargo": 220, "hull": 380, "shields": 50,  "sensors": 35,
 	 "desc": "Стандартный торговый транспортник. Надёжный и вместительный."},
 	{"name": "Баржа-С",         "ship_type": "Грузовой", "ship_class": "C",
-	 "price":  9000, "speed": 110, "cargo": 100, "hull": 250, "shields": 30,  "sensors": 25,
+	 "price": 13500, "speed": 110, "cargo": 100, "hull": 250, "shields": 30,  "sensors": 25,
 	 "desc": "Дешёвый грузовик. Медленный, уязвимый, но много места."},
 	# ── Боевой ────────────────────────────────────────────────────────
 	{"name": "Дредноут-А",      "ship_type": "Боевой", "ship_class": "A",
-	 "price": 85000, "speed": 200, "cargo": 80,  "hull": 900, "shields": 150, "sensors": 70,
+	 "price": 127500, "speed": 200, "cargo": 80,  "hull": 900, "shields": 150, "sensors": 70,
 	 "desc": "Тяжёлый дредноут. Максимальная броня и огневая мощь класса."},
 	{"name": "Корвет-Б",        "ship_type": "Боевой", "ship_class": "B",
-	 "price": 38000, "speed": 250, "cargo": 55,  "hull": 500, "shields": 110, "sensors": 60,
+	 "price": 57000, "speed": 250, "cargo": 55,  "hull": 500, "shields": 110, "sensors": 60,
 	 "desc": "Боевой корвет. Баланс скорости и огневой мощи."},
 	{"name": "Перехватчик-С",   "ship_type": "Боевой", "ship_class": "C",
-	 "price": 14000, "speed": 300, "cargo": 25,  "hull": 250, "shields": 65,  "sensors": 50,
+	 "price": 21000, "speed": 300, "cargo": 25,  "hull": 250, "shields": 65,  "sensors": 50,
 	 "desc": "Лёгкий истребитель. Быстрый, но хрупкий."},
 	# ── Ресурсодобывающий ─────────────────────────────────────────────
 	{"name": "Горнодобытчик-А", "ship_type": "Ресурсодобывающий", "ship_class": "A",
-	 "price": 52000, "speed": 120, "cargo": 300, "hull": 450, "shields": 60,  "sensors": 80,
+	 "price": 78000, "speed": 120, "cargo": 300, "hull": 450, "shields": 60,  "sensors": 80,
 	 "desc": "Промышленный шахтёр класса А. Мощные буры, большой трюм для руды."},
 	{"name": "Бурильщик-Б",     "ship_type": "Ресурсодобывающий", "ship_class": "B",
-	 "price": 26000, "speed": 140, "cargo": 180, "hull": 320, "shields": 45,  "sensors": 60,
+	 "price": 39000, "speed": 140, "cargo": 180, "hull": 320, "shields": 45,  "sensors": 60,
 	 "desc": "Средний добывающий корабль. Хороший баланс для начала."},
 	{"name": "Кирка-С",         "ship_type": "Ресурсодобывающий", "ship_class": "C",
-	 "price": 10000, "speed": 100, "cargo": 80,  "hull": 200, "shields": 25,  "sensors": 40,
+	 "price": 15000, "speed": 100, "cargo": 80,  "hull": 200, "shields": 25,  "sensors": 40,
 	 "desc": "Базовый горнодобытчик. Минимальное оснащение."},
 	# ── Штурмовой ─────────────────────────────────────────────────────
 	{"name": "Рапира-А",        "ship_type": "Штурмовой", "ship_class": "A",
-	 "price": 72000, "speed": 340, "cargo": 40,  "hull": 650, "shields": 200, "sensors": 80,
+	 "price": 108000, "speed": 340, "cargo": 40,  "hull": 650, "shields": 200, "sensors": 80,
 	 "desc": "Элитный штурмовик. Высочайшая скорость боевого класса, прекрасная манёвренность."},
 	{"name": "Фалькон-Б",       "ship_type": "Штурмовой", "ship_class": "B",
-	 "price": 31000, "speed": 290, "cargo": 30,  "hull": 380, "shields": 130, "sensors": 65,
+	 "price": 46500, "speed": 290, "cargo": 30,  "hull": 380, "shields": 130, "sensors": 65,
 	 "desc": "Быстрый штурмовик. Отличная манёвренность для боевых операций."},
 	{"name": "Стриж-С",         "ship_type": "Штурмовой", "ship_class": "C",
-	 "price": 12000, "speed": 260, "cargo": 15,  "hull": 180, "shields": 55,  "sensors": 45,
+	 "price": 18000, "speed": 260, "cargo": 15,  "hull": 180, "shields": 55,  "sensors": 45,
 	 "desc": "Лёгкий штурмовик. Дёшевый, быстрый, уязвимый."},
 	# ── Дипломатический ───────────────────────────────────────────────
 	{"name": "Посол-А",         "ship_type": "Дипломатический", "ship_class": "A",
-	 "price": 95000, "speed": 195, "cargo": 120, "hull": 600, "shields": 250, "sensors": 90,
+	 "price": 142500, "speed": 195, "cargo": 120, "hull": 600, "shields": 250, "sensors": 90,
 	 "desc": "Роскошный дипломатический крейсер. Бонус +20 к репутации всех фракций при переговорах."},
 	{"name": "Эмиссар-Б",       "ship_type": "Дипломатический", "ship_class": "B",
-	 "price": 42000, "speed": 175, "cargo": 80,  "hull": 400, "shields": 160, "sensors": 70,
+	 "price": 63000, "speed": 175, "cargo": 80,  "hull": 400, "shields": 160, "sensors": 70,
 	 "desc": "Дипломатический транспорт. Внушает доверие и уважение во всех портах."},
 	# ── Пиратский ─────────────────────────────────────────────────────
 	{"name": "Хищник-А",        "ship_type": "Пиратский", "ship_class": "A",
-	 "price": 68000, "speed": 310, "cargo": 110, "hull": 700, "shields": 170, "sensors": 60,
+	 "price": 102000, "speed": 310, "cargo": 110, "hull": 700, "shields": 170, "sensors": 60,
 	 "desc": "Тяжёлый рейдер пиратов. Много орудий, вместительный трюм для добычи. Покупка снижает репутацию Федерации."},
 	{"name": "Корсар-Б",        "ship_type": "Пиратский", "ship_class": "B",
-	 "price": 28000, "speed": 275, "cargo": 75,  "hull": 420, "shields": 100, "sensors": 50,
+	 "price": 42000, "speed": 275, "cargo": 75,  "hull": 420, "shields": 100, "sensors": 50,
 	 "desc": "Лёгкий корсар. Быстрый налётчик среднего класса."},
 	# ── Флагманский (требует лидерство фракцией) ──────────────────────
 	{"name": "Колосс-А",        "ship_type": "Флагманский", "ship_class": "A",
-	 "price": 500000, "speed": 170, "cargo": 250, "hull": 2000, "shields": 300, "sensors": 100,
+	 "price": 750000, "speed": 170, "cargo": 250, "hull": 2000, "shields": 300, "sensors": 100,
 	 "desc": "ФЛАГМАН КЛАССА А — Командный корабль фракции. Только для лидера. Управляй флотом с мостика."},
 	{"name": "Авангард-Б",      "ship_type": "Флагманский", "ship_class": "B",
-	 "price": 220000, "speed": 195, "cargo": 180, "hull": 1200, "shields": 220, "sensors": 85,
+	 "price": 330000, "speed": 195, "cargo": 180, "hull": 1200, "shields": 220, "sensors": 85,
 	 "desc": "ФЛАГМАН КЛАССА Б — Боевой крейсер командования. Требует лидерства фракцией."},
 	{"name": "Командор-С",      "ship_type": "Флагманский", "ship_class": "C",
-	 "price": 95000,  "speed": 215, "cargo": 120, "hull": 750,  "shields": 150, "sensors": 70,
+	 "price": 142500, "speed": 215, "cargo": 120, "hull": 750,  "shields": 150, "sensors": 70,
 	 "desc": "ФЛАГМАН КЛАССА С — Тяжёлый фрегат командования. Начальный флагман лидера."},
 ]
 
 const WEAPONS := [
 	# Лёгкое
-	{"name": "Импульсное орудие",      "price":  1800, "damage":  25, "type": "pulse",    "ammo": 200,
+	{"name": "Импульсное орудие",      "price":  2700, "damage":  25, "type": "pulse",    "ammo": 200,
 	 "desc": "Скорострельное лёгкое орудие. Небольшой урон, но высокий темп огня. Батарей: 200."},
 	# Среднее
-	{"name": "Лазерные пушки",         "price":  4500, "damage":  70, "type": "energy",   "ammo": 100,
+	{"name": "Лазерные пушки",         "price":  6750, "damage":  70, "type": "energy",   "ammo": 100,
 	 "desc": "Стандартное энергетическое оружие. Надёжное и точное. Батарей: 100."},
-	{"name": "Электропушка",           "price":  6000, "damage": 110, "type": "emp",      "ammo": 80,
+	{"name": "Электропушка",           "price":  9000, "damage": 110, "type": "emp",      "ammo": 80,
 	 "desc": "Электромагнитный разряд. Выводит системы врага из строя. Батарей: 80."},
 	# Тяжёлое
-	{"name": "Турболазерные батареи",  "price":  9500, "damage": 155, "type": "turbolaser","ammo": 60,
+	{"name": "Турболазерные батареи",  "price": 14250, "damage": 155, "type": "turbolaser","ammo": 60,
 	 "desc": "Двойной лазерный залп: выстреливает 2 снаряда одновременно. Батарей: 60."},
-	{"name": "Плазменные пушки",       "price": 11000, "damage": 160, "type": "plasma",   "ammo": 50,
+	{"name": "Плазменные пушки",       "price": 16500, "damage": 160, "type": "plasma",   "ammo": 50,
 	 "desc": "Плазменные сгустки пробивают щиты. Веер из 3 снарядов. Батарей: 50."},
-	{"name": "Торпеды Z-120",          "price": 15000, "damage": 200, "type": "torpedo",  "ammo": 5,
+	{"name": "Торпеды Z-120",          "price": 22500, "damage": 200, "type": "torpedo",  "ammo": 5,
 	 "desc": "Самонаводящиеся торпеды. Сокрушительный урон. Боезапас: 5 торпед."},
 	# Сверхтяжёлое
-	{"name": "Рельсовая пушка",        "price": 22000, "damage": 700, "type": "railgun",  "ammo": 15,
+	{"name": "Рельсовая пушка",        "price": 33000, "damage": 700, "type": "railgun",       "ammo": 15,
 	 "desc": "Кинетический снаряд с чудовищным уроном. Зарядов: 15."},
+	{"name": "Торпеды Z-240",          "price": 90000, "damage": 600, "type": "torpedo_heavy", "ammo": 4,
+	 "desc": "Тяжёлые торпеды Z-240. При пуске весь боезапас уходит залпом — по торпеде на цель. Боезапас: 4."},
 ]
 
 # ── Weapon categories ────────────────────────────────────────────────────────
@@ -121,6 +123,7 @@ const WEAPON_CATEGORY := {
 	"Плазменные пушки":      "heavy",
 	"Торпеды Z-120":         "heavy",
 	"Рельсовая пушка":       "superheavy",
+	"Торпеды Z-240":         "superheavy",
 }
 
 # ship_type → ship_class → {slots, cats}
@@ -202,91 +205,91 @@ const QUEST_TYPES := [
 	{
 		"id": "cargo_delivery", "title": "Доставка груза",
 		"desc": "Перевезите %d единиц %s на %s. Срочный заказ — клиент платит хорошо.",
-		"reward_min": 800,  "reward_max": 2000, "type": "trade",
+		"reward_min": 2400,  "reward_max": 6000, "type": "trade",
 		"icon": "📦"
 	},
 	{
 		"id": "bounty_hunt", "title": "Охота за головой",
 		"desc": "Пират по имени %s угрожает торговым путям. Уничтожьте его корабль. Живым не нужен.",
-		"reward_min": 1500, "reward_max": 4000, "type": "combat",
+		"reward_min": 4500, "reward_max": 12000, "type": "combat",
 		"icon": "💀"
 	},
 	{
 		"id": "escort", "title": "Эскортирование",
 		"desc": "Транспортный корабль следует в %s. Защитите его от пиратов на всём пути.",
-		"reward_min": 1200, "reward_max": 3000, "type": "combat",
+		"reward_min": 3600, "reward_max": 9000, "type": "combat",
 		"icon": "🛡"
 	},
 	{
 		"id": "rescue", "title": "Спасательная операция",
 		"desc": "Экипаж корабля застрял в секторе %s. Найдите их и доставьте в безопасное место.",
-		"reward_min": 600,  "reward_max": 1800, "type": "exploration",
+		"reward_min": 1800,  "reward_max": 5400, "type": "exploration",
 		"icon": "🆘"
 	},
 	{
 		"id": "smuggling", "title": "Контрабанда",
 		"desc": "Груз нелегален, но хорошо оплачивается. Доставьте его в %s, минуя патрули.",
-		"reward_min": 2000, "reward_max": 5000, "type": "trade",
+		"reward_min": 6000, "reward_max": 15000, "type": "trade",
 		"icon": "🕵"
 	},
 	{
 		"id": "patrol", "title": "Патрулирование сектора",
 		"desc": "Патрулируйте сектор вокруг %s в течение трёх суток. Доложите об аномалиях.",
-		"reward_min": 500,  "reward_max": 1200, "type": "patrol",
+		"reward_min": 1500,  "reward_max": 3600, "type": "patrol",
 		"icon": "🔭"
 	},
 	{
 		"id": "exploration", "title": "Разведка системы",
 		"desc": "Система %s до сих пор не картографирована. Исследуйте все планеты и вернитесь.",
-		"reward_min": 900,  "reward_max": 2500, "type": "exploration",
+		"reward_min": 2700,  "reward_max": 7500, "type": "exploration",
 		"icon": "🗺"
 	},
 	{
 		"id": "mining", "title": "Добыча ресурсов",
 		"desc": "Добудьте %d единиц руды в поясе астероидов и доставьте на %s.",
-		"reward_min": 700,  "reward_max": 1800, "type": "trade",
+		"reward_min": 2100,  "reward_max": 5400, "type": "trade",
 		"icon": "⛏"
 	},
 	{
 		"id": "assassination", "title": "Устранение цели",
 		"desc": "Адмирал %s ведёт карательные экспедиции против мирных колоний. Остановите его.",
-		"reward_min": 3000, "reward_max": 7000, "type": "combat",
+		"reward_min": 9000, "reward_max": 21000, "type": "combat",
 		"icon": "🎯"
 	},
 	{
 		"id": "data_retrieval", "title": "Извлечение данных",
 		"desc": "Военный спутник на орбите %s содержит секретные коды. Взломайте и передайте данные.",
-		"reward_min": 1800, "reward_max": 4500, "type": "stealth",
+		"reward_min": 5400, "reward_max": 13500, "type": "stealth",
 		"icon": "💾"
 	},
 	{
 		"id": "diplomacy", "title": "Дипломатическая миссия",
 		"desc": "Доставьте посла фракции %s на переговоры. Никаких стычек — репутация на кону.",
-		"reward_min": 1000, "reward_max": 2800, "type": "trade",
+		"reward_min": 3000, "reward_max": 8400, "type": "trade",
 		"icon": "🤝"
 	},
 	{
 		"id": "defense", "title": "Оборона базы",
 		"desc": "Пиратский флот атакует станцию %s. Помогите отразить несколько волн нападения.",
-		"reward_min": 2000, "reward_max": 5500, "type": "combat",
+		"reward_min": 6000, "reward_max": 16500, "type": "combat",
 		"icon": "🏰"
 	},
 	{
 		"id": "mystery", "title": "Исчезновение корабля",
 		"desc": "Транспортник «%s» не выходит на связь уже 5 суток. Выясните что произошло.",
-		"reward_min": 1200, "reward_max": 3200, "type": "exploration",
+		"reward_min": 3600, "reward_max": 9600, "type": "exploration",
 		"icon": "👁"
 	},
 	{
 		"id": "mercenary", "title": "Наёмник фракции",
 		"desc": "Фракция %s ведёт войну и срочно нанимает пилотов. Три миссии, хорошая плата.",
-		"reward_min": 2500, "reward_max": 6000, "type": "combat",
+		"reward_min": 7500, "reward_max": 18000, "type": "combat",
 		"icon": "⚔"
 	},
 	{
 		"id": "trade_run", "title": "Торговый рейс",
 		"desc": "Купите товары здесь и продайте их в %s по максимальной цене. Время ограничено.",
-		"reward_min": 400,  "reward_max": 1500, "type": "trade",
+		"reward_min": 1200,  "reward_max": 4500, "type": "trade",
 		"icon": "💰"
 	},
 ]

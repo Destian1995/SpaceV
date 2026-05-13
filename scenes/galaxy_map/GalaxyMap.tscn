@@ -57,44 +57,52 @@ modulate = Color(0.4, 0.55, 0.85, 0.9)
 anchors_preset = 3
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -295.0
-offset_top = 54.0
-offset_bottom = 400.0
+offset_left = -420.0
+offset_top = 50.0
+offset_bottom = 610.0
 
 [node name="VBox" type="VBoxContainer" parent="UI/InfoPanel"]
+theme_override_constants/separation = 5
 
 [node name="SystemName" type="Label" parent="UI/InfoPanel/VBox"]
 text = "---"
-theme_override_font_sizes/font_size = 23
+theme_override_font_sizes/font_size = 24
 horizontal_alignment = 1
+
+[node name="SubName" type="Label" parent="UI/InfoPanel/VBox"]
+text = ""
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+modulate = Color(0.5, 0.58, 0.75, 1)
 
 [node name="HSep" type="HSeparator" parent="UI/InfoPanel/VBox"]
 
 [node name="Faction" type="Label" parent="UI/InfoPanel/VBox"]
 text = "Фракция: -"
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 14
 
 [node name="Danger" type="Label" parent="UI/InfoPanel/VBox"]
 text = "Опасность: -"
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 14
 
-[node name="JumpCost" type="Label" parent="UI/InfoPanel/VBox"]
-text = ""
-theme_override_font_sizes/font_size = 13
-modulate = Color(1.0, 0.85, 0.3, 1)
+[node name="DynInfo" type="VBoxContainer" parent="UI/InfoPanel/VBox"]
+theme_override_constants/separation = 4
+size_flags_horizontal = 3
 
 [node name="Gap" type="Control" parent="UI/InfoPanel/VBox"]
-custom_minimum_size = Vector2(0, 8)
+custom_minimum_size = Vector2(0, 4)
 
 [node name="EnterBtn" type="Button" parent="UI/InfoPanel/VBox"]
 text = "🚀 Войти в систему"
 theme_override_font_sizes/font_size = 19
-custom_minimum_size = Vector2(265, 52)
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 52)
 
 [node name="JumpBtn" type="Button" parent="UI/InfoPanel/VBox"]
 text = "⚡ Гиперпрыжок"
 theme_override_font_sizes/font_size = 19
-custom_minimum_size = Vector2(265, 52)
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 52)
 
 [node name="StatusLabel" type="Label" parent="UI"]
 anchors_preset = 7

@@ -70,13 +70,13 @@ func _build_ui() -> void:
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root_vbox.add_child(tabs)
 
+	_repair_list   = _make_scroll_tab(tabs, "🔧 Ремонт")
 	_bar_list      = _make_scroll_tab(tabs, "🍺 Бар")
 	_trade_list    = _make_scroll_tab(tabs, "💰 Торговля")
 	_weapons_list  = _make_scroll_tab(tabs, "⚔ Оружие")
 	_ships_list    = _make_scroll_tab(tabs, "🚀 Корабли")
 	_quests_list   = _make_scroll_tab(tabs, "📋 Задания")
 	_bank_list     = _make_scroll_tab(tabs, "🏦 Банк")
-	_repair_list   = _make_scroll_tab(tabs, "🔧 Ремонт")
 	_upgrades_list = _make_scroll_tab(tabs, "🔬 Улучшения")
 	_hq_list       = _make_scroll_tab(tabs, "🏛 Штаб")
 
@@ -120,6 +120,24 @@ func _refresh_credits() -> void:
 
 # ── Trade ────────────────────────────────────────────────────────────────────
 
+func _trade_day_factor(item_name: String, day: int) -> float:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(item_name + "_mkt_" + str(day))
+	return rng.randf_range(0.72, 1.40)
+
+func _trade_price_history(item_name: String, base_buy: int) -> Array:
+	var prices: Array = []
+	for i in range(-6, 1):
+		prices.append(int(base_buy * _trade_day_factor(item_name, GameManager.day + i)))
+	return prices
+
+func _trade_trend(item_name: String) -> String:
+	var f_prev := _trade_day_factor(item_name, GameManager.day - 1)
+	var f_cur  := _trade_day_factor(item_name, GameManager.day)
+	if f_cur > f_prev + 0.04: return "↑"
+	if f_cur < f_prev - 0.04: return "↓"
+	return "→"
+
 func _populate_trade() -> void:
 	_clear(_trade_list)
 	var goods: Dictionary = current_planet.get("goods", {})
@@ -127,62 +145,172 @@ func _populate_trade() -> void:
 		_trade_list.add_child(_lbl("Товаров нет", 16))
 		return
 
-	# Header row
-	var hdr := HBoxContainer.new()
-	for pair in [["Товар", 200], ["Купить", 140], ["Продать", 140], ["Склад", 80]]:
-		var l := _lbl(pair[0], 13)
-		l.custom_minimum_size = Vector2(pair[1], 0)
-		l.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
-		hdr.add_child(l)
-	_trade_list.add_child(hdr)
+	_trade_list.add_child(_lbl("📈 Галактический рынок — цены обновляются ежедневно", 15, Color(0.5, 0.8, 1.0)))
+	var cargo_used := GameManager.cargo_capacity - GameManager.cargo_free()
+	_trade_list.add_child(_lbl("День %d  |  Груз: %d/%d  |  Кредиты: %d" % [
+		GameManager.day, cargo_used, GameManager.cargo_capacity, GameManager.credits],
+		13, Color(0.65, 0.65, 0.65)))
 	_trade_list.add_child(HSeparator.new())
 
 	for item_name in goods:
 		var d = goods[item_name]
-		var row := HBoxContainer.new()
+		var factor   := _trade_day_factor(item_name, GameManager.day)
+		var cur_buy  := maxi(1, int(d["buy_price"]  * factor))
+		var cur_sell := maxi(1, int(d["sell_price"] * factor))
+		var trend    := _trade_trend(item_name)
+		var history  := _trade_price_history(item_name, int(d["buy_price"]))
+		var in_cargo: int = GameManager.cargo.get(item_name, 0)
+		var stock: int   = int(d["stock"])
+
+		# ── Информационная строка ──────────────────────────────────────
+		var info_row := HBoxContainer.new()
+		info_row.add_theme_constant_override("separation", 8)
 
 		var name_lbl := _lbl(item_name, 16)
-		name_lbl.custom_minimum_size = Vector2(200, 0)
-		row.add_child(name_lbl)
+		name_lbl.custom_minimum_size = Vector2(160, 0)
+		info_row.add_child(name_lbl)
 
-		var buy_lbl := _lbl("%d к." % d["buy_price"], 15)
-		buy_lbl.custom_minimum_size = Vector2(140, 0)
-		row.add_child(buy_lbl)
+		var trend_col := Color(0.3, 1.0, 0.45) if trend == "↑" else (Color(1.0, 0.38, 0.3) if trend == "↓" else Color(0.75, 0.75, 0.75))
+		var price_lbl := _lbl("%d к. %s" % [cur_buy, trend], 15, trend_col)
+		price_lbl.custom_minimum_size = Vector2(110, 0)
+		info_row.add_child(price_lbl)
 
-		var sell_lbl := _lbl("%d к." % d["sell_price"], 15)
-		sell_lbl.custom_minimum_size = Vector2(140, 0)
-		row.add_child(sell_lbl)
+		var sell_lbl := _lbl("→ %d к." % cur_sell, 14, Color(0.9, 0.85, 0.4))
+		sell_lbl.custom_minimum_size = Vector2(100, 0)
+		info_row.add_child(sell_lbl)
 
-		var stock_lbl := _lbl("×%d" % d["stock"], 14)
-		stock_lbl.custom_minimum_size = Vector2(80, 0)
-		row.add_child(stock_lbl)
+		# Линейный график цен за 7 дней
+		var chart := PriceLineChart.new()
+		chart.prices   = history
+		chart.trend_up = (trend == "↑")
+		chart.trend_dn = (trend == "↓")
+		chart.custom_minimum_size = Vector2(110, 34)
+		info_row.add_child(chart)
 
+		var stock_col := Color(0.35, 1.0, 0.5) if stock > 10 else Color(1.0, 0.65, 0.2)
+		var stock_lbl := _lbl("склад: %d" % stock, 13, stock_col)
+		stock_lbl.custom_minimum_size = Vector2(85, 0)
+		info_row.add_child(stock_lbl)
+
+		var cargo_col := Color(0.95, 0.82, 0.3) if in_cargo > 0 else Color(0.38, 0.38, 0.38)
+		var cargo_lbl := _lbl("у вас: %d" % in_cargo, 13, cargo_col)
+		cargo_lbl.custom_minimum_size = Vector2(70, 0)
+		info_row.add_child(cargo_lbl)
+
+		# Средняя цена покупки
+		if in_cargo > 0 and GameManager.cargo_avg_price.has(item_name):
+			var avg_p: int = GameManager.cargo_avg_price[item_name]
+			var pnl := cur_sell - avg_p
+			var pnl_col := Color(0.30, 1.0, 0.45) if pnl >= 0 else Color(1.0, 0.38, 0.32)
+			var pnl_str := ("+%d" % pnl) if pnl >= 0 else ("%d" % pnl)
+			var bought_lbl := _lbl("куплено: %d к.  (%s к./шт.)" % [avg_p, pnl_str], 12, pnl_col)
+			info_row.add_child(bought_lbl)
+
+		_trade_list.add_child(info_row)
+
+		# ── Строка действий: купить ──────────────────────────────────
+		var max_buy := 0
+		if stock > 0 and GameManager.cargo_free() > 0 and cur_buy > 0:
+			max_buy = mini(stock, mini(GameManager.cargo_free(), GameManager.credits / cur_buy))
+
+		var buy_row := HBoxContainer.new()
+		buy_row.add_theme_constant_override("separation", 6)
+		var buy_spacer := Control.new()
+		buy_spacer.custom_minimum_size = Vector2(16, 0)
+		buy_row.add_child(buy_spacer)
+		var buy_lbl2 := _lbl("Купить:", 13, Color(0.55, 0.85, 0.55))
+		buy_lbl2.custom_minimum_size = Vector2(60, 0)
+		buy_row.add_child(buy_lbl2)
+		var buy_spin := SpinBox.new()
+		buy_spin.min_value = 1
+		buy_spin.max_value = maxi(1, max_buy)
+		buy_spin.value = 1
+		buy_spin.custom_minimum_size = Vector2(100, 0)
+		buy_spin.editable = max_buy > 0
+		buy_row.add_child(buy_spin)
+		var buy_cost_lbl := _lbl("= %d к." % cur_buy, 13, Color(0.6, 0.6, 0.6))
+		buy_spin.value_changed.connect(func(v): buy_cost_lbl.text = "= %d к." % [int(v) * cur_buy])
+		buy_row.add_child(buy_cost_lbl)
 		var buy_btn := Button.new()
 		buy_btn.text = "Купить"
-		buy_btn.disabled = GameManager.credits < d["buy_price"] or d["stock"] <= 0 or GameManager.cargo_free() <= 0
-		buy_btn.pressed.connect(_buy_good.bind(item_name, d))
-		row.add_child(buy_btn)
+		buy_btn.disabled = max_buy <= 0
+		buy_btn.custom_minimum_size = Vector2(80, 0)
+		buy_btn.pressed.connect(_buy_good_qty.bind(item_name, d, buy_spin, cur_buy))
+		buy_row.add_child(buy_btn)
+		if max_buy <= 0:
+			var why := ""
+			if stock <= 0: why = "нет на складе"
+			elif GameManager.cargo_free() <= 0: why = "трюм полон"
+			elif GameManager.credits < cur_buy: why = "нет кредитов"
+			if why != "":
+				buy_row.add_child(_lbl("  (%s)" % why, 12, Color(0.6, 0.4, 0.4)))
+		_trade_list.add_child(buy_row)
 
+		# ── Строка действий: продать ─────────────────────────────────
+		var sell_row := HBoxContainer.new()
+		sell_row.add_theme_constant_override("separation", 6)
+		var sell_spacer := Control.new()
+		sell_spacer.custom_minimum_size = Vector2(16, 0)
+		sell_row.add_child(sell_spacer)
+		var sell_lbl2 := _lbl("Продать:", 13, Color(0.85, 0.65, 0.35))
+		sell_lbl2.custom_minimum_size = Vector2(60, 0)
+		sell_row.add_child(sell_lbl2)
+		var sell_spin := SpinBox.new()
+		sell_spin.min_value = 1
+		sell_spin.max_value = maxi(1, in_cargo)
+		sell_spin.value = 1
+		sell_spin.custom_minimum_size = Vector2(100, 0)
+		sell_spin.editable = in_cargo > 0
+		sell_row.add_child(sell_spin)
+		var sell_rev_lbl := _lbl("= %d к." % cur_sell, 13, Color(0.6, 0.6, 0.6))
+		sell_spin.value_changed.connect(func(v): sell_rev_lbl.text = "= %d к." % [int(v) * cur_sell])
+		sell_row.add_child(sell_rev_lbl)
 		var sell_btn := Button.new()
 		sell_btn.text = "Продать"
-		sell_btn.disabled = not GameManager.cargo.has(item_name)
-		sell_btn.pressed.connect(_sell_good.bind(item_name, d))
-		row.add_child(sell_btn)
+		sell_btn.disabled = in_cargo <= 0
+		sell_btn.custom_minimum_size = Vector2(80, 0)
+		sell_btn.pressed.connect(_sell_good_qty.bind(item_name, d, sell_spin, cur_sell))
+		sell_row.add_child(sell_btn)
+		_trade_list.add_child(sell_row)
 
-		_trade_list.add_child(row)
+		_trade_list.add_child(HSeparator.new())
 
-func _buy_good(item_name: String, d: Dictionary) -> void:
-	if GameManager.spend_credits(d["buy_price"]) and GameManager.add_cargo(item_name, 1):
-		d["stock"] -= 1
-		_populate_trade()
-		_refresh_credits()
+func _buy_good_qty(item_name: String, d: Dictionary, spin: SpinBox, cur_price: int) -> void:
+	var qty := int(spin.value)
+	var total_cost := qty * cur_price
+	if GameManager.credits < total_cost:
+		return
+	var actually_added := 0
+	for i in qty:
+		if GameManager.spend_credits(cur_price) and GameManager.add_cargo(item_name, 1):
+			actually_added += 1
+		else:
+			break
+	# Обновляем среднюю цену покупки
+	if actually_added > 0:
+		var old_qty: int = GameManager.cargo.get(item_name, 0) - actually_added
+		var old_avg: float = float(GameManager.cargo_avg_price.get(item_name, cur_price))
+		var new_avg: float = (old_avg * old_qty + float(cur_price) * actually_added) / float(old_qty + actually_added)
+		GameManager.cargo_avg_price[item_name] = int(new_avg)
+	d["stock"] -= actually_added
+	_populate_trade()
+	_refresh_credits()
 
-func _sell_good(item_name: String, d: Dictionary) -> void:
-	if GameManager.remove_cargo(item_name, 1):
-		GameManager.add_credits(d["sell_price"])
-		d["stock"] += 1
-		_populate_trade()
-		_refresh_credits()
+func _sell_good_qty(item_name: String, d: Dictionary, spin: SpinBox, cur_price: int) -> void:
+	var qty := int(spin.value)
+	var actually_sold := 0
+	for i in qty:
+		if GameManager.remove_cargo(item_name, 1):
+			GameManager.add_credits(cur_price)
+			actually_sold += 1
+		else:
+			break
+	d["stock"] += actually_sold
+	# Если всё продано — убираем запись о цене покупки
+	if not GameManager.cargo.has(item_name) or GameManager.cargo.get(item_name, 0) <= 0:
+		GameManager.cargo_avg_price.erase(item_name)
+	_populate_trade()
+	_refresh_credits()
 
 # ── Weapons ──────────────────────────────────────────────────────────────────
 
@@ -277,6 +405,14 @@ func _populate_ships() -> void:
 			owned,
 			func(): _buy_ship(s)
 		)
+		# Вставляем иконку корабля перед текстовым блоком
+		var hb: HBoxContainer = card.get_child(0) as HBoxContainer
+		var icon := ShipIconDraw.new()
+		icon.ship_type  = s.get("ship_type",  "")
+		icon.ship_class = s.get("ship_class", "C")
+		icon.custom_minimum_size = Vector2(88, 58)
+		hb.add_child(icon)
+		hb.move_child(icon, 0)
 		_ships_list.add_child(card)
 
 func _buy_ship(s: Dictionary) -> void:
@@ -739,6 +875,12 @@ func _accept_quest(q: Dictionary) -> void:
 	qd["battles_won_at_accept"] = GameManager.total_battles_won
 	qd["day_at_accept"] = GameManager.day
 	GameManager.active_quests.append(qd)
+	# Открываем систему-назначение из тумана войны
+	if not qd.get("is_local", false):
+		var dest: String = qd.get("dest_galaxy", "")
+		if dest != "" and not dest in GameManager.quest_revealed_systems:
+			GameManager.quest_revealed_systems.append(dest)
+			print("[Spaceport] Quest revealed system: %s" % dest)
 	print("[Spaceport] Quest accepted: %s" % q["title"])
 	_populate_quests()
 	_refresh_credits()
@@ -1785,3 +1927,192 @@ func _lbl(text: String, size: int = 15, col: Color = Color.WHITE) -> Label:
 func _clear(container: VBoxContainer) -> void:
 	for c in container.get_children():
 		c.queue_free()
+
+# ── Процедурная иконка корабля ────────────────────────────────────────────────
+class ShipIconDraw extends Control:
+	var ship_type:  String = ""
+	var ship_class: String = ""
+
+	func _draw() -> void:
+		var W := size.x
+		var H := size.y
+		var col: Color
+		match ship_class:
+			"A": col = Color(0.42, 0.88, 1.00)
+			"B": col = Color(0.35, 0.70, 0.92)
+			_:   col = Color(0.28, 0.55, 0.78)
+		var dim    := Color(col.r * 0.28, col.g * 0.28, col.b * 0.38, 1.0)
+		var bright := Color(minf(col.r + 0.28, 1.0), minf(col.g + 0.28, 1.0), minf(col.b + 0.22, 1.0))
+		# Фоновое свечение
+		draw_circle(Vector2(W * 0.5, H * 0.5), H * 0.44, Color(col.r, col.g, col.b, 0.07))
+		match ship_type:
+			"Исследовательский":
+				var body := PackedVector2Array([
+					Vector2(W*0.82, H*0.50), Vector2(W*0.54, H*0.28),
+					Vector2(W*0.14, H*0.42), Vector2(W*0.14, H*0.58),
+					Vector2(W*0.54, H*0.72)])
+				draw_polygon(body, PackedColorArray([dim]))
+				draw_polyline(body, col, 1.2, true)
+				draw_polygon(PackedVector2Array([Vector2(W*0.34,H*0.42), Vector2(W*0.50,H*0.20), Vector2(W*0.52,H*0.38)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.65)]))
+				draw_polygon(PackedVector2Array([Vector2(W*0.34,H*0.58), Vector2(W*0.50,H*0.80), Vector2(W*0.52,H*0.62)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.65)]))
+				draw_circle(Vector2(W*0.82, H*0.50), 3.2, bright)
+				draw_circle(Vector2(W*0.14, H*0.50), 4.5, Color(0.30,0.80,1.0,0.55))
+				draw_circle(Vector2(W*0.14, H*0.50), 2.2, Color(0.75,0.96,1.0,0.90))
+			"Грузовой":
+				draw_rect(Rect2(Vector2(W*0.12,H*0.28), Vector2(W*0.58,H*0.44)), dim)
+				draw_rect(Rect2(Vector2(W*0.12,H*0.28), Vector2(W*0.58,H*0.44)), col, false, 1.2)
+				draw_polygon(PackedVector2Array([Vector2(W*0.70,H*0.36), Vector2(W*0.86,H*0.50), Vector2(W*0.70,H*0.64)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.80)]))
+				for i in 3:
+					var lx := W*0.12 + W*0.58 * (0.28 + i * 0.22)
+					draw_line(Vector2(lx,H*0.30), Vector2(lx,H*0.70), Color(col.r,col.g,col.b,0.28), 1.0)
+				draw_circle(Vector2(W*0.12, H*0.38), 3.8, Color(0.45,0.70,1.0,0.60))
+				draw_circle(Vector2(W*0.12, H*0.62), 3.8, Color(0.45,0.70,1.0,0.60))
+				draw_circle(Vector2(W*0.12, H*0.38), 2.0, Color(0.80,0.90,1.0,0.90))
+				draw_circle(Vector2(W*0.12, H*0.62), 2.0, Color(0.80,0.90,1.0,0.90))
+			"Боевой":
+				var body := PackedVector2Array([
+					Vector2(W*0.86,H*0.50), Vector2(W*0.50,H*0.26),
+					Vector2(W*0.12,H*0.38), Vector2(W*0.18,H*0.50),
+					Vector2(W*0.12,H*0.62), Vector2(W*0.50,H*0.74)])
+				draw_polygon(body, PackedColorArray([dim]))
+				draw_polyline(body, col, 1.3, true)
+				draw_polygon(PackedVector2Array([Vector2(W*0.54,H*0.26), Vector2(W*0.44,H*0.08), Vector2(W*0.30,H*0.28)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.62)]))
+				draw_polygon(PackedVector2Array([Vector2(W*0.54,H*0.74), Vector2(W*0.44,H*0.92), Vector2(W*0.30,H*0.72)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.62)]))
+				draw_circle(Vector2(W*0.86, H*0.50), 3.0, bright)
+				draw_circle(Vector2(W*0.13, H*0.50), 5.5, Color(1.0,0.52,0.18,0.52))
+				draw_circle(Vector2(W*0.13, H*0.50), 3.0, Color(1.0,0.80,0.45,0.90))
+			"Ресурсодобывающий":
+				draw_rect(Rect2(Vector2(W*0.14,H*0.30), Vector2(W*0.50,H*0.40)), dim)
+				draw_rect(Rect2(Vector2(W*0.14,H*0.30), Vector2(W*0.50,H*0.40)), col, false, 1.2)
+				draw_polygon(PackedVector2Array([Vector2(W*0.64,H*0.38), Vector2(W*0.88,H*0.50), Vector2(W*0.64,H*0.62)]),
+					PackedColorArray([bright]))
+				for i in 3:
+					draw_line(Vector2(W*0.64, H*(0.40+i*0.10)), Vector2(W*0.84, H*0.50),
+						Color(1.0,1.0,1.0,0.35), 1.0)
+				draw_rect(Rect2(Vector2(W*0.28,H*0.70), Vector2(W*0.24,H*0.12)), Color(col.r,col.g,col.b,0.55))
+				draw_circle(Vector2(W*0.14, H*0.42), 3.5, Color(0.40,0.70,1.0,0.60))
+				draw_circle(Vector2(W*0.14, H*0.58), 3.5, Color(0.40,0.70,1.0,0.60))
+				draw_circle(Vector2(W*0.14, H*0.42), 2.0, Color(0.80,0.92,1.0,0.90))
+				draw_circle(Vector2(W*0.14, H*0.58), 2.0, Color(0.80,0.92,1.0,0.90))
+			"Штурмовой":
+				var body := PackedVector2Array([
+					Vector2(W*0.88,H*0.50), Vector2(W*0.34,H*0.14),
+					Vector2(W*0.12,H*0.50), Vector2(W*0.34,H*0.86)])
+				draw_polygon(body, PackedColorArray([dim]))
+				draw_polyline(body, col, 1.3, true)
+				draw_line(Vector2(W*0.88,H*0.50), Vector2(W*0.18,H*0.50),
+					Color(col.r,col.g,col.b,0.45), 2.2)
+				draw_circle(Vector2(W*0.88, H*0.50), 2.8, bright)
+				draw_circle(Vector2(W*0.13, H*0.50), 6.0, Color(1.0,0.38,0.14,0.48))
+				draw_circle(Vector2(W*0.13, H*0.50), 3.5, Color(1.0,0.68,0.38,0.90))
+			"Дипломатический":
+				var pts := PackedVector2Array()
+				for i in 24:
+					var a := float(i) / 24.0 * TAU
+					pts.append(Vector2(W*0.50 + cos(a)*W*0.32, H*0.50 + sin(a)*H*0.22))
+				draw_polygon(pts, PackedColorArray([dim]))
+				draw_polyline(pts, col, 1.2, true)
+				draw_polygon(PackedVector2Array([Vector2(W*0.82,H*0.50), Vector2(W*0.62,H*0.40), Vector2(W*0.62,H*0.60)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.78)]))
+				draw_polygon(PackedVector2Array([Vector2(W*0.18,H*0.50), Vector2(W*0.08,H*0.28), Vector2(W*0.28,H*0.40)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.55)]))
+				draw_polygon(PackedVector2Array([Vector2(W*0.18,H*0.50), Vector2(W*0.08,H*0.72), Vector2(W*0.28,H*0.60)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.55)]))
+				draw_circle(Vector2(W*0.20, H*0.50), 4.5, Color(0.62,0.48,1.0,0.50))
+				draw_circle(Vector2(W*0.20, H*0.50), 2.4, Color(0.82,0.70,1.0,0.90))
+			"Пиратский":
+				var body := PackedVector2Array([
+					Vector2(W*0.86,H*0.50), Vector2(W*0.60,H*0.24),
+					Vector2(W*0.38,H*0.30), Vector2(W*0.12,H*0.42),
+					Vector2(W*0.20,H*0.50), Vector2(W*0.12,H*0.58),
+					Vector2(W*0.38,H*0.70), Vector2(W*0.60,H*0.76)])
+				draw_polygon(body, PackedColorArray([dim]))
+				draw_polyline(body, col, 1.3, true)
+				draw_polygon(PackedVector2Array([Vector2(W*0.44,H*0.30), Vector2(W*0.36,H*0.10), Vector2(W*0.56,H*0.26)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.68)]))
+				draw_circle(Vector2(W*0.86, H*0.50), 3.0, bright)
+				draw_circle(Vector2(W*0.14, H*0.50), 5.0, Color(1.0,0.28,0.18,0.52))
+				draw_circle(Vector2(W*0.14, H*0.50), 2.8, Color(1.0,0.58,0.38,0.90))
+			"Флагманский":
+				var hull := PackedVector2Array([
+					Vector2(W*0.84,H*0.50), Vector2(W*0.56,H*0.20),
+					Vector2(W*0.10,H*0.32), Vector2(W*0.10,H*0.68),
+					Vector2(W*0.56,H*0.80)])
+				draw_polygon(hull, PackedColorArray([dim]))
+				draw_polyline(hull, col, 1.5, true)
+				draw_rect(Rect2(Vector2(W*0.44,H*0.16), Vector2(W*0.26,H*0.14)),
+					Color(col.r,col.g,col.b,0.55))
+				draw_rect(Rect2(Vector2(W*0.44,H*0.16), Vector2(W*0.26,H*0.14)),
+					bright, false, 1.0)
+				draw_polygon(PackedVector2Array([Vector2(W*0.50,H*0.80), Vector2(W*0.38,H*0.94), Vector2(W*0.24,H*0.80)]),
+					PackedColorArray([Color(col.r,col.g,col.b,0.52)]))
+				draw_circle(Vector2(W*0.84, H*0.50), 4.0, bright)
+				for ey in [0.38, 0.50, 0.62]:
+					draw_circle(Vector2(W*0.10, H*ey), 4.0, Color(0.38,0.78,1.0,0.50))
+					draw_circle(Vector2(W*0.10, H*ey), 2.2, Color(0.70,0.95,1.0,0.90))
+			_:
+				# Fallback: простой силуэт
+				draw_polygon(PackedVector2Array([
+					Vector2(W*0.80,H*0.50), Vector2(W*0.50,H*0.28),
+					Vector2(W*0.15,H*0.40), Vector2(W*0.15,H*0.60), Vector2(W*0.50,H*0.72)]),
+					PackedColorArray([dim]))
+				draw_circle(Vector2(W*0.15, H*0.50), 4.0, Color(0.40,0.75,1.0,0.60))
+
+# ── График цен (линейный) ─────────────────────────────────────────────────────
+class PriceLineChart extends Control:
+	var prices:    Array  = []   # массив float/int — 7 значений
+	var line_col:  Color  = Color(0.42, 0.82, 1.0)
+	var trend_up:  bool   = false
+	var trend_dn:  bool   = false
+
+	func _draw() -> void:
+		if prices.size() < 2:
+			return
+		var W := size.x
+		var H := size.y
+		var pad_x := 4.0
+		var pad_y := 5.0
+		var mn: float = float(prices.min())
+		var mx: float = float(prices.max())
+		var rng: float = mx - mn
+		if rng < 1.0:
+			rng = 1.0
+
+		# Фон
+		draw_rect(Rect2(Vector2.ZERO, size), Color(0.06, 0.08, 0.14, 0.75))
+		# Горизонтальные направляющие
+		for i in 3:
+			var gy := pad_y + (H - pad_y * 2.0) * (float(i) / 2.0)
+			draw_line(Vector2(pad_x, gy), Vector2(W - pad_x, gy), Color(1.0,1.0,1.0,0.06), 1.0)
+
+		# Вычисляем точки
+		var pts := PackedVector2Array()
+		var n := prices.size()
+		for i in n:
+			var px := pad_x + (W - pad_x * 2.0) * (float(i) / float(n - 1))
+			var norm := (float(prices[i]) - mn) / rng
+			var py := H - pad_y - (H - pad_y * 2.0) * norm
+			pts.append(Vector2(px, py))
+
+		# Тень линии
+		var shadow_pts := PackedVector2Array()
+		for p in pts:
+			shadow_pts.append(p + Vector2(0, 1.5))
+		draw_polyline(shadow_pts, Color(0,0,0,0.35), 2.0)
+
+		# Основная линия — цвет по тренду
+		var lc := Color(0.35, 1.0, 0.50) if trend_up else (Color(1.0, 0.38, 0.32) if trend_dn else line_col)
+		draw_polyline(pts, lc, 2.0)
+
+		# Точки на каждом дне
+		for i in pts.size():
+			var is_last := (i == pts.size() - 1)
+			var dot_col := Color(1.0, 1.0, 1.0, 0.90) if is_last else Color(lc.r, lc.g, lc.b, 0.65)
+			var dot_r   := 3.2 if is_last else 1.8
+			draw_circle(pts[i], dot_r + 1.5, Color(0,0,0,0.35))
+			draw_circle(pts[i], dot_r, dot_col)

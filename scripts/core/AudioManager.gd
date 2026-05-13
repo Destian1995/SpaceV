@@ -21,16 +21,16 @@ func _ready() -> void:
 	_build("click",     _gen_click())
 	print("[AudioManager] %d звуков загружено" % _players.size())
 
-func _build(name: String, wav: AudioStreamWAV) -> void:
+func _build(sfx_name: String, wav: AudioStreamWAV) -> void:
 	var player := AudioStreamPlayer.new()
 	player.stream    = wav
 	player.volume_db = -8.0
 	add_child(player)
-	_players[name] = player
+	_players[sfx_name] = player
 
-func play_sfx(name: String) -> void:
-	if not _players.has(name): return
-	var p: AudioStreamPlayer = _players[name]
+func play_sfx(sfx_name: String) -> void:
+	if not _players.has(sfx_name): return
+	var p: AudioStreamPlayer = _players[sfx_name]
 	if p.playing: p.stop()
 	p.play()
 
