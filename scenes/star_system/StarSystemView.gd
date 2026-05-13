@@ -19,8 +19,13 @@ var near_idx:    int     = -1
 var time_e:      float   = 0.0
 
 var enemies: Array = []
+var friendly_ships: Array = []   # союзные корабли патрулируют штаб
 var spaceport_ui = null  # CanvasLayer instance
 var _combat_triggered: bool = false
+
+var mined_planets:  Array = []   # индексы планет уже добытых в этом посещении
+var _mine_panel              = null
+var _conquest_panel          = null
 
 # Camera pan
 var cam_pan:    Vector2 = Vector2.ZERO
@@ -30,6 +35,14 @@ const ENEMY_CHASE_RANGE   := 180.0
 const ENEMY_ATTACK_RANGE  := 60.0
 const ENEMY_SPEED         := 85.0
 const ENEMY_PATROL_SPEED  := 38.0
+
+const FRIENDLY_DETECT_RANGE    := 260.0
+const FRIENDLY_ATTACK_RANGE    := 65.0
+const FRIENDLY_SPEED           := 105.0
+const FRIENDLY_RETREAT_HULL    := 0.22   # отступить при HP < 22%
+const FRIENDLY_ATTACK_COOLDOWN := 1.8    # секунды между атаками
+const FRIENDLY_DAMAGE          := 18.0   # урон по врагу за выстрел
+const FRIENDLY_TAKE_DAMAGE     := 10.0   # урон союзнику от вражеского огня
 
 # UI refs
 @onready var lbl_galaxy   = $UI/TopBar/HBox/GalaxyName
@@ -63,7 +76,10 @@ func _ready() -> void:
 	planet_panel.hide()
 	_gen_bg_stars()
 	_gen_planets()
+	_build_mine_panel()
+	_build_conquest_panel()
 	_gen_enemies()
+	_gen_friendly_ships()
 
 	# Load spaceport BEFORE any await so it's always ready
 	spaceport_ui = preload("res://scenes/spaceport/Spaceport.tscn").instantiate()
@@ -86,6 +102,7 @@ func _ready() -> void:
 		_combat_triggered = true
 		if enemies.is_empty():
 			lbl_status.text = "🏆 Все враги уничтожены! Космопорты системы открыты."
+			_check_conquest_available()
 		else:
 			lbl_status.text = "✅ Победа! Осталось врагов: %d — космопорты заблокированы." % enemies.size()
 		_refresh_planet_panel()
@@ -104,6 +121,157 @@ func _ready() -> void:
 		_combat_triggered = false
 	else:
 		_update_status_label()
+
+func _build_mine_panel() -> void:
+	var ui_layer = $UI
+	_mine_panel = PanelContainer.new()
+	_mine_panel.anchor_left   = 0.5; _mine_panel.anchor_right  = 0.5
+	_mine_panel.anchor_top    = 1.0; _mine_panel.anchor_bottom = 1.0
+	_mine_panel.offset_left   = -220; _mine_panel.offset_right  = 220
+	_mine_panel.offset_top    = -170; _mine_panel.offset_bottom = -90
+	ui_layer.add_child(_mine_panel)
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	_mine_panel.add_child(vb)
+	var lbl := Label.new()
+	lbl.name = "MineLbl"
+	lbl.text = "⛏  Добыть ресурсы"
+	lbl.add_theme_font_size_override("font_size", 16)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(lbl)
+	var btn := Button.new()
+	btn.name = "MineBtn"
+	btn.text = "⛏ Начать добычу"
+	btn.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	btn.custom_minimum_size = Vector2(260, 44)
+	btn.pressed.connect(_do_mine)
+	vb.add_child(btn)
+	_mine_panel.hide()
+
+func _build_conquest_panel() -> void:
+	var ui_layer = $UI
+	_conquest_panel = PanelContainer.new()
+	_conquest_panel.anchor_left   = 0.5; _conquest_panel.anchor_right  = 0.5
+	_conquest_panel.anchor_top    = 0.5; _conquest_panel.anchor_bottom = 0.5
+	_conquest_panel.offset_left   = -280; _conquest_panel.offset_right  = 280
+	_conquest_panel.offset_top    = -100; _conquest_panel.offset_bottom = 100
+	ui_layer.add_child(_conquest_panel)
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	_conquest_panel.add_child(vb)
+	var lbl := Label.new()
+	lbl.name = "ConquestLbl"
+	lbl.text = "🏴 Завоевать систему"
+	lbl.add_theme_font_size_override("font_size", 20)
+	lbl.add_theme_color_override("font_color", Color(1.0, 0.7, 0.1))
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(lbl)
+	var info := Label.new()
+	info.name = "ConquestInfo"
+	info.add_theme_font_size_override("font_size", 13)
+	info.add_theme_color_override("font_color", Color(0.8, 0.8, 0.85))
+	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(info)
+	var hb := HBoxContainer.new()
+	hb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_child(hb)
+	var btn_yes := Button.new()
+	btn_yes.name = "ConquestYes"
+	btn_yes.text = "🏴 Завоевать"
+	btn_yes.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
+	btn_yes.custom_minimum_size = Vector2(160, 44)
+	btn_yes.pressed.connect(_do_conquer)
+	hb.add_child(btn_yes)
+	var btn_no := Button.new()
+	btn_no.text = "✖ Отмена"
+	btn_no.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
+	btn_no.custom_minimum_size = Vector2(100, 44)
+	btn_no.pressed.connect(func(): _conquest_panel.hide())
+	hb.add_child(btn_no)
+	_conquest_panel.hide()
+
+func _do_mine() -> void:
+	if near_idx < 0 or near_idx in mined_planets:
+		return
+	var ship_type: String = GameManager.current_ship.get("ship_type", "")
+	if ship_type != "Ресурсодобывающий":
+		lbl_status.text = "⛏ Для добычи нужен Ресурсодобывающий корабль!"
+		return
+	var p = planets[near_idx]
+	if p.get("has_spaceport", false):
+		return
+	# Определяем что добывается исходя из типа планеты
+	var ptype: String = p.get("type", "")
+	var loot: Dictionary = {}
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(galaxy_name + str(near_idx) + str(GameManager.day))
+	if "Вулкан" in ptype:
+		loot = {"Руда": rng.randi_range(8, 20), "Металлы": rng.randi_range(3, 8)}
+	elif "Ледяная" in ptype or "Снеж" in ptype:
+		loot = {"Топливо": rng.randi_range(5, 14), "Руда": rng.randi_range(4, 10)}
+	elif "Газ" in ptype:
+		loot = {"Топливо": rng.randi_range(10, 24)}
+	elif "Каменист" in ptype:
+		loot = {"Руда": rng.randi_range(6, 16), "Металлы": rng.randi_range(2, 6)}
+	elif "Пустын" in ptype:
+		loot = {"Руда": rng.randi_range(4, 12)}
+	elif "Океан" in ptype:
+		loot = {"Медикаменты": rng.randi_range(2, 6), "Еда": rng.randi_range(5, 12)}
+	elif "Джунг" in ptype:
+		loot = {"Еда": rng.randi_range(6, 16), "Медикаменты": rng.randi_range(3, 8)}
+	else:
+		loot = {"Руда": rng.randi_range(4, 10)}
+	# Добавляем в трюм
+	var added: Array = []
+	for item in loot:
+		var qty: int = loot[item]
+		if GameManager.add_cargo(item, qty):
+			added.append("%d×%s" % [qty, item])
+		else:
+			added.append("(трюм полон: %s)" % item)
+	mined_planets.append(near_idx)
+	_mine_panel.hide()
+	if added.is_empty():
+		lbl_status.text = "⛏ Ресурсов нет — трюм полон!"
+	else:
+		lbl_status.text = "⛏ Добыто: %s" % ", ".join(added)
+
+func _check_conquest_available() -> void:
+	if _conquest_panel == null:
+		return
+	# Условия: лидер фракции, война с текущей фракцией, нет врагов, система не протекторат,
+	#          ≥7 союзников всего и ≥3 дредноута
+	var current_sys_faction: String = GameManager.current_faction
+	if GameManager.faction_leader_of.is_empty():
+		return
+	if not (current_sys_faction in GameManager.war_targets):
+		return
+	if not enemies.is_empty():
+		return
+	if GameManager.is_protectorate(galaxy_name):
+		return
+	if GameManager.faction_allies.size() < 7:
+		return
+	if GameManager.count_fleet_dreadnoughts() < 3:
+		return
+	# Показываем панель завоевания
+	var info_lbl: Label = _conquest_panel.get_node_or_null("VBoxContainer/ConquestInfo")
+	if info_lbl:
+		var dread_count := GameManager.count_fleet_dreadnoughts()
+		var base_inc := 600 + GameManager.current_danger * 150
+		info_lbl.text = (
+			"Система %s (%s) сопротивление сломлено.\n" +
+			"Флот: %d кораблей, %d дредноутов.\n" +
+			"Ожидаемый доход: +%d кред./день"
+		) % [galaxy_name, current_sys_faction, GameManager.faction_allies.size(), dread_count, base_inc]
+	_conquest_panel.show()
+
+func _do_conquer() -> void:
+	_conquest_panel.hide()
+	var base_inc := 600 + GameManager.current_danger * 150
+	GameManager.conquer_system(galaxy_name, GameManager.current_faction, base_inc)
+	lbl_status.text = "🏴 %s теперь под вашим контролем! Доход: +%d кред./день" % [galaxy_name, base_inc]
 
 func _gen_bg_stars() -> void:
 	var rng := RandomNumberGenerator.new()
@@ -220,9 +388,179 @@ func _gen_enemies() -> void:
 			"variant":      vari,  # 0=scout 1=fighter 2=heavy
 		})
 
+func _gen_friendly_ships() -> void:
+	# Создаём патрульные союзные корабли только если это штаб фракции игрока
+	if GameManager.faction_hq_system == "" or GameManager.faction_hq_system != GameManager.current_galaxy:
+		return
+	var hq_allies: Array = []
+	for a in GameManager.faction_allies:
+		if a.get("location", "hq") == "hq":
+			hq_allies.append(a)
+	if hq_allies.is_empty():
+		return
+	var vp := get_viewport_rect().size
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(GameManager.faction_hq_system + "_patrol")
+	for idx in hq_allies.size():
+		var angle: float = float(idx) / float(hq_allies.size()) * TAU + rng.randf_range(-0.3, 0.3)
+		var dist: float  = rng.randf_range(120.0, 360.0)
+		var epos: Vector2 = STAR_POS + Vector2(cos(angle), sin(angle)) * dist
+		epos = epos.clamp(Vector2(50, 50), vp - Vector2(50, 50))
+		friendly_ships.append({
+			"pos":          epos,
+			"angle":        rng.randf_range(0, TAU),
+			"patrol_center": epos,
+			"patrol_r":     rng.randf_range(45.0, 100.0),
+			"patrol_angle": rng.randf_range(0, TAU),
+			"patrol_spd":   rng.randf_range(0.25, 0.55) * (1 if rng.randf() > 0.5 else -1),
+			"ally":         hq_allies[idx],
+			"phase":        rng.randf_range(0, TAU),
+			"state":        "patrol",   # patrol | engage | retreat
+			"hull":         hq_allies[idx].get("hull_pct", 1.0),
+			"attack_timer": 0.0,
+			"target_id":    -1,
+			"hit_flash":    0.0,
+		})
+
+func _update_friendly_ships(delta: float) -> void:
+	var to_remove: Array = []
+
+	for f in friendly_ships:
+		# Tick timers
+		if f["attack_timer"] > 0.0:
+			f["attack_timer"] -= delta
+		if f["hit_flash"] > 0.0:
+			f["hit_flash"] = max(0.0, f["hit_flash"] - delta * 4.0)
+
+		match f["state"]:
+			# ── Патрулирование ──────────────────────────────────────────────────
+			"patrol":
+				f["patrol_angle"] += f["patrol_spd"] * delta
+				var pt: Vector2 = f["patrol_center"] + \
+					Vector2(cos(f["patrol_angle"]), sin(f["patrol_angle"])) * f["patrol_r"]
+				var dir: Vector2 = pt - f["pos"]
+				if dir.length() > 2.0:
+					f["pos"] += dir.normalized() * ENEMY_PATROL_SPEED * delta
+					f["angle"] = atan2(dir.y, dir.x) + PI / 2.0
+				# Ищем ближайшего врага в зоне обнаружения
+				var best_id: int = -1
+				var best_dist: float = FRIENDLY_DETECT_RANGE
+				for e in enemies:
+					var d: float = f["pos"].distance_to(e["pos"])
+					if d < best_dist:
+						best_dist = d
+						best_id = e["id"]
+				if best_id >= 0:
+					f["target_id"] = best_id
+					f["state"] = "engage"
+
+			# ── Атака ───────────────────────────────────────────────────────────
+			"engage":
+				# Поиск цели по id
+				var target_e = null
+				for e in enemies:
+					if e["id"] == f["target_id"]:
+						target_e = e
+						break
+				# Цель исчезла → вернуться в патруль
+				if target_e == null:
+					f["state"] = "patrol"
+					f["target_id"] = -1
+					continue
+				# Критический урон → отступить
+				if f["hull"] <= FRIENDLY_RETREAT_HULL:
+					f["state"] = "retreat"
+					continue
+				# Двигаемся к врагу
+				var dir: Vector2 = target_e["pos"] - f["pos"]
+				var dist: float = dir.length()
+				if dist > FRIENDLY_ATTACK_RANGE:
+					f["pos"] += dir.normalized() * FRIENDLY_SPEED * delta
+					f["angle"] = atan2(dir.y, dir.x) + PI / 2.0
+				else:
+					# В зоне огня — обмен ударами
+					if f["attack_timer"] <= 0.0:
+						f["attack_timer"] = FRIENDLY_ATTACK_COOLDOWN
+						# Урон врагу
+						target_e["hull"] -= FRIENDLY_DAMAGE
+						target_e["hit_flash"] = 1.0
+						# Ответный огонь
+						f["hull"] -= FRIENDLY_TAKE_DAMAGE / max(1.0, float(enemies.size()))
+						f["hit_flash"] = 1.0
+						# Синхронизируем hull_pct с союзником
+						f["ally"]["hull_pct"] = f["hull"]
+						# Враг уничтожен?
+						if target_e["hull"] <= 0:
+							_log_fleet_battle(f, true,
+								"уничтожил %s (ост. HP: %d%%)" % [
+									"Разведчика" if target_e["variant"] == 0 else ("Истребителя" if target_e["variant"] == 1 else "Тяжёлый"),
+									int(f["hull"] * 100)])
+							if not GameManager.current_system_dead_enemies.has(target_e["id"]):
+								GameManager.current_system_dead_enemies.append(target_e["id"])
+							enemies.erase(target_e)
+							f["state"] = "patrol"
+							f["target_id"] = -1
+							_refresh_planet_panel()
+							if enemies.is_empty():
+								lbl_status.text = "⭐ Союзники очистили систему от врагов!"
+								_check_conquest_available()
+						# Союзник погиб?
+						if f["hull"] <= 0.0:
+							_log_fleet_battle(f, false,
+								"уничтожен в бою (HP достиг 0)")
+							GameManager.faction_allies.erase(f["ally"])
+							to_remove.append(f)
+
+			# ── Отступление ─────────────────────────────────────────────────────
+			"retreat":
+				# Двигаемся к центру патруля (от ближайшего врага)
+				var nearest_enemy_pos: Vector2 = f["patrol_center"]
+				var min_d: float = INF
+				for e in enemies:
+					var d: float = f["pos"].distance_to(e["pos"])
+					if d < min_d:
+						min_d = d
+						nearest_enemy_pos = e["pos"]
+				var away: Vector2 = (f["pos"] - nearest_enemy_pos).normalized()
+				f["pos"] += away * FRIENDLY_SPEED * 0.7 * delta
+				f["angle"] = atan2(-away.y, -away.x) + PI / 2.0
+				# Медленное восстановление брони в отступлении (15% HP в секунду)
+				f["hull"] = min(1.0, f["hull"] + 0.015 * delta)
+				f["ally"]["hull_pct"] = f["hull"]
+				# Вернуться в патруль когда HP > 40% или врагов нет
+				if f["hull"] > 0.40 or enemies.is_empty():
+					f["state"] = "patrol"
+					_log_fleet_battle(f, true,
+						"отступил и восстановился (HP: %d%%)" % int(f["hull"] * 100))
+
+	# Удаляем уничтоженных союзников
+	for f in to_remove:
+		friendly_ships.erase(f)
+
+func _log_fleet_battle(f: Dictionary, victory: bool, detail: String) -> void:
+	var ally: Dictionary = f.get("ally", {})
+	var aname: String = ally.get("name", "Союзник")
+	var ship:  String = ally.get("ship",  "?")
+	var icon:  String = "✅" if victory else "💀"
+	var msg: String = "%s День %d — %s (%s): %s" % [icon, GameManager.day, aname, ship, detail]
+	GameManager.hq_attack_log.append(msg)
+	if GameManager.hq_attack_log.size() > 10:
+		GameManager.hq_attack_log.remove_at(0)
+	print("[Fleet] " + msg)
+
 func _update_status_label() -> void:
+	var hq_note: String = ""
+	if not friendly_ships.is_empty():
+		var engaging := 0
+		for f in friendly_ships:
+			if f.get("state", "patrol") == "engage":
+				engaging += 1
+		if engaging > 0:
+			hq_note = "  |  ⭐ Штаб: %d союзников (%d в бою)" % [friendly_ships.size(), engaging]
+		else:
+			hq_note = "  |  ⭐ Штаб: %d союзных кораблей" % friendly_ships.size()
 	if enemies.is_empty():
-		lbl_status.text = "✅ Система чиста — нажмите на планету чтобы лететь к ней"
+		lbl_status.text = "✅ Система чиста — нажмите на планету чтобы лететь к ней" + hq_note
 	else:
 		lbl_status.text = "🔴 Враждебных судов: %d — космопорты ЗАБЛОКИРОВАНЫ! Уничтожьте их." % enemies.size()
 
@@ -233,6 +571,7 @@ func _process(delta: float) -> void:
 	_update_orbits(delta)
 	_move_ship(delta)
 	_update_enemies(delta)
+	_update_friendly_ships(delta)
 	_check_proximity()
 	_check_enemy_hover()
 	queue_redraw()
@@ -325,6 +664,9 @@ func _refresh_planet_panel() -> void:
 	if near_idx >= 0:
 		var p = planets[near_idx]
 		var blocked: bool = enemies.size() > 0
+		var is_mining_ship: bool = GameManager.current_ship.get("ship_type", "") == "Ресурсодобывающий"
+		var can_mine: bool = (not p.get("has_spaceport", false) and not blocked
+			and is_mining_ship and not (near_idx in mined_planets))
 		lbl_pname.text = p["name"]
 		lbl_ptype.text = "Тип: " + p["type"]
 		lbl_cargo.text = "Груз: %d/%d" % [GameManager.cargo_capacity - GameManager.cargo_free(), GameManager.cargo_capacity]
@@ -339,10 +681,20 @@ func _refresh_planet_panel() -> void:
 			btn_land.text     = "🛬 Войти в космопорт"
 			btn_land.disabled = false
 		else:
-			lbl_port.text     = "❌ Нет космопорта"
-			lbl_port.modulate = Color(1.0, 0.5, 0.5)
+			var already_mined: bool = near_idx in mined_planets
+			lbl_port.text     = "⛏ Уже добыто" if already_mined else "⛏ Необитаемая — добыча возможна" if is_mining_ship else "❌ Нет космопорта"
+			lbl_port.modulate = Color(0.8, 0.7, 0.2) if is_mining_ship and not already_mined else Color(1.0, 0.5, 0.5)
 			btn_land.text     = "🔭 Исследовать (нет порта)"
 			btn_land.disabled = false
+		# Показать/скрыть панель добычи
+		if _mine_panel:
+			var mine_lbl: Label = _mine_panel.get_node_or_null("VBoxContainer/MineLbl")
+			if mine_lbl:
+				mine_lbl.text = "⛏  %s — %s" % [p["name"], p.get("type","")]
+			if can_mine:
+				_mine_panel.show()
+			else:
+				_mine_panel.hide()
 		planet_panel.show()
 		if blocked:
 			lbl_status.text = "🔴 %s — враги в системе! Космопорт заблокирован." % p["name"]
@@ -350,6 +702,8 @@ func _refresh_planet_panel() -> void:
 			lbl_status.text = "Рядом: %s" % p["name"]
 	else:
 		planet_panel.hide()
+		if _mine_panel:
+			_mine_panel.hide()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if spaceport_ui and spaceport_ui.visible:
@@ -463,6 +817,10 @@ func _draw() -> void:
 		var arr: Vector2 = td - dir * 28
 		draw_line(arr, arr + dir.rotated(2.4) * 10, Color(0.4, 0.8, 1.0, 0.7), 1.5)
 		draw_line(arr, arr + dir.rotated(-2.4) * 10, Color(0.4, 0.8, 1.0, 0.7), 1.5)
+
+	# ── Союзные корабли штаба ───────────────────────────────────────────────────
+	for f in friendly_ships:
+		_draw_friendly_ship(f)
 
 	# ── Enemy ships ─────────────────────────────────────────────────────────
 	for e in enemies:
@@ -679,6 +1037,78 @@ func _draw_enemy(e: Dictionary) -> void:
 	var tag := "РАЗВЕДЧИК" if variant == 0 else ("ИСТРЕБИТЕЛЬ" if variant == 1 else "ТЯЖЁЛЫЙ")
 	draw_string(ThemeDB.fallback_font, pos + Vector2(-28, sz + 16),
 		tag, HORIZONTAL_ALIGNMENT_CENTER, 80, 10, Color(1.0, 0.35, 0.25, 0.7))
+
+func _draw_friendly_ship(f: Dictionary) -> void:
+	var pos:   Vector2 = f["pos"]
+	var angle: float   = f["angle"]
+	var fwd:   Vector2 = Vector2(sin(angle), -cos(angle))
+	var right: Vector2 = fwd.rotated(PI / 2.0)
+	var sz:    float   = 15.0
+
+	var back:   Vector2 = pos - fwd * sz * 0.62
+	var tip:    Vector2 = pos + fwd * sz * 1.1
+	var wing_l: Vector2 = pos - fwd * sz * 0.08 + right * sz * 0.90
+	var wing_r: Vector2 = pos - fwd * sz * 0.08 - right * sz * 0.90
+	var tail_l: Vector2 = back + right * sz * 0.38
+	var tail_r: Vector2 = back - right * sz * 0.38
+
+	var fstate: String = f.get("state", "patrol")
+	var hull:   float  = f.get("hull", 1.0)
+	var flash:  float  = f.get("hit_flash", 0.0)
+	var is_engaging: bool = fstate == "engage"
+
+	# Сине-зелёная расцветка союзного корабля
+	var base_col := Color(0.15, 0.70, 0.45, 0.92)
+	var acc_col  := Color(0.30, 0.95, 0.65, 0.58)
+	if flash > 0.0:
+		base_col = base_col.lerp(Color.WHITE, flash)
+		acc_col  = acc_col.lerp(Color.WHITE,  flash)
+
+	# Двигатель (синеватый, интенсивнее в бою)
+	var eng_alpha: float = 0.22 + (0.35 if is_engaging else 0.0)
+	draw_circle(back, sz * 0.40, Color(0.25, 0.75, 0.95, eng_alpha))
+	var fl: float = 0.55 + sin(time_e * 20.0 + f.get("phase", 0.0)) * 0.30
+	draw_circle(back - fwd * 3, sz * 0.30 * fl, Color(0.2, 0.85, 1.0, 0.72))
+	if is_engaging:
+		draw_circle(back - fwd * 8,  sz * 0.22 * fl, Color(0.3, 0.9, 1.0, 0.45))
+		draw_circle(back - fwd * 14, sz * 0.14 * fl, Color(0.5, 1.0, 1.0, 0.22))
+
+	# Корпус
+	draw_colored_polygon([tip, wing_l, tail_l, back, tail_r, wing_r], base_col)
+	draw_colored_polygon([tip, pos + right * sz * 0.18, back, pos - right * sz * 0.18], acc_col)
+
+	# Кабина (голубая)
+	var cock: Vector2 = pos + fwd * sz * 0.38
+	draw_circle(cock, sz * 0.21, Color(0.2, 0.65, 1.0, 0.88))
+	draw_circle(cock, sz * 0.11, Color(0.55, 0.92, 1.0, 0.95))
+
+	# Огни на крыльях (зелёные, красные при отступлении)
+	var light_col := Color(0.2, 1.0, 0.45, 0.92) if fstate != "retreat" else Color(1.0, 0.4, 0.1, 0.92)
+	draw_circle(wing_l, 2.2, light_col)
+	draw_circle(wing_r, 2.2, light_col)
+
+	# Пульсирующий щит / боевой индикатор
+	if is_engaging:
+		var warn_pulse: float = 0.45 + sin(time_e * 5.5) * 0.35
+		draw_arc(pos, sz + 9, -PI * 0.65, PI * 0.65, 22, Color(1.0, 0.85, 0.1, warn_pulse), 2.0)
+	else:
+		var shield_pulse: float = 0.10 + sin(time_e * 1.8 + f.get("phase", 0.0)) * 0.05
+		draw_arc(pos, sz + 8, 0, TAU, 28, Color(0.25, 0.90, 0.55, shield_pulse), 1.4)
+
+	# Полоска корпуса (показываем если повреждён или в бою)
+	if hull < 1.0 or is_engaging:
+		var bar_w: float = sz * 2.4
+		var bar_y: float = pos.y - sz - 14
+		draw_rect(Rect2(pos.x - bar_w * 0.5, bar_y, bar_w, 4), Color(0.05, 0.05, 0.05, 0.85))
+		var hp_col := Color(0.1, 0.9, 0.2) if hull > 0.5 else (Color(0.9, 0.7, 0.1) if hull > 0.25 else Color(1.0, 0.15, 0.1))
+		draw_rect(Rect2(pos.x - bar_w * 0.5, bar_y, bar_w * hull, 4), hp_col)
+
+	# Подпись — тип корабля из данных союзника
+	var ally: Dictionary = f.get("ally", {})
+	var ship_label: String = ally.get("ship", "Союзник")
+	var label_col := Color(1.0, 0.75, 0.1, 0.85) if is_engaging else Color(0.25, 1.0, 0.55, 0.72)
+	draw_string(ThemeDB.fallback_font, pos + Vector2(-32, sz + 14),
+		ship_label, HORIZONTAL_ALIGNMENT_CENTER, 80, 10, label_col)
 
 func _draw_ship() -> void:
 	var ship_type:  String = GameManager.current_ship.get("ship_type", "Исследовательский")

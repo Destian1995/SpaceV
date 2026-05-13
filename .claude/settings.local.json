@@ -8,7 +8,8 @@
       "Read(//c/Users/lerdo/**)",
       "Bash(find '/c/Program Files' -name Godot*.exe)",
       "Bash(find /c/Users/lerdo/AppData -name godot*.log -o -name editor*.log)",
-      "Bash(grep -r \"AudioStreamPlayer\\\\|SfxManager\\\\|AudioManager\\\\|SoundManager\" /c/Users/lerdo/IdeaProjects/SpaceV/scripts /c/Users/lerdo/IdeaProjects/SpaceV/scenes --include=*.gd)"
+      "Bash(grep -r \"AudioStreamPlayer\\\\|SfxManager\\\\|AudioManager\\\\|SoundManager\" /c/Users/lerdo/IdeaProjects/SpaceV/scripts /c/Users/lerdo/IdeaProjects/SpaceV/scenes --include=*.gd)",
+      "Bash(xargs wc:*)"
     ]
   }
 }

@@ -19,8 +19,13 @@ var current_ship: Dictionary = {
 }
 var faction_leader_of: String = ""  # название фракции если игрок лидер
 var player_faction:    String = ""  # фракция к которой принадлежит игрок ("" = без фракции)
-# Союзники фракции: массив словарей {name, ship, income, level}
+var faction_hq_system: String = ""  # система-штаб созданной фракции
+# Союзники фракции: массив словарей {name, ship, income, icon, location}
 var faction_allies: Array = []
+# Лог атак на штаб (последние 5 событий)
+var hq_attack_log: Array = []
+# Названия посещённых систем (для выбора дислокации флота)
+var visited_galaxy_names: Array = ["Sol Prime"]
 var equipped_weapons: Array = []
 
 # Cargo hold
@@ -84,6 +89,20 @@ var max_fuel: float = 100.0
 # ── Гиперпространственная встреча (ловушка во время прыжка) ───────────────────
 var pending_hyperspace_encounter: bool = false
 
+# ── Война и протектораты ────────────────────────────────────────────────────────
+var war_targets:   Array = []   # фракции которым объявлена война
+var protectorates: Array = []   # завоёванные системы: [{name, faction, income, garrison_strength}]
+
+# Мощь союзных кораблей (для расчёта бунта)
+const ALLY_SHIP_STRENGTH := {
+	"Перехватчик": 2,
+	"Корвет":      5,
+	"Крейсер":     10,
+	"Дредноут":    20,
+}
+const PROTECTORATE_GARRISON_STRENGTH := 15   # гарнизон из 3 корветов
+const REBELLION_SURPLUS_PCT          := 0.15 # нужно быть сильнее на 15%
+
 signal state_changed(new_state: GameState)
 signal credits_changed(amount: int)
 
@@ -124,6 +143,51 @@ func advance_day() -> void:
 			credits += ally_income
 			credits_changed.emit(credits)
 			print("[Faction] Союзники принесли %d кред. за день %d" % [ally_income, day])
+	# ── Атака на штаб враждебными фракциями ──────────────────────────────────────
+	if faction_hq_system != "" and not faction_allies.is_empty():
+		var hostile: Array = []
+		for f in faction_reputation:
+			if faction_reputation.get(f, 0) < -30 and f != player_faction and f != "Нет":
+				hostile.append(f)
+		if not hostile.is_empty() and randf() < 0.06:  # 6% шанс в день
+			var attacker: String = hostile[randi() % hostile.size()]
+			# Ищем союзников в штабе
+			var hq_ships: Array = []
+			for a in faction_allies:
+				if a.get("location", "hq") == "hq":
+					hq_ships.append(a)
+			if hq_ships.size() > 0:
+				var victim: Dictionary = hq_ships[randi() % hq_ships.size()]
+				faction_allies.erase(victim)
+				var msg := "⚔ День %d — %s атаковала штаб! Уничтожен: %s (%s)" % [
+					day, attacker, victim.get("name", "?"), victim.get("ship", "?")]
+				hq_attack_log.append(msg)
+				if hq_attack_log.size() > 5:
+					hq_attack_log.remove_at(0)
+				print("[HQ] " + msg)
+	# ── Доход от протекторатов ───────────────────────────────────────────────────
+	if not protectorates.is_empty():
+		var prot_income := 0
+		for p in protectorates:
+			prot_income += int(p.get("income", 0))
+		if prot_income > 0:
+			credits += prot_income
+			credits_changed.emit(credits)
+			print("[Protectorate] Доход от %d систем: +%d кред." % [protectorates.size(), prot_income])
+		# ── Проверка бунта ─────────────────────────────────────────────────────
+		var total_prot_str := 0
+		for p in protectorates:
+			total_prot_str += int(p.get("garrison_strength", PROTECTORATE_GARRISON_STRENGTH))
+		var fleet_str := get_fleet_strength()
+		if fleet_str <= int(total_prot_str * (1.0 + REBELLION_SURPLUS_PCT)) and randf() < 0.05:
+			var rebel: Dictionary = protectorates[randi() % protectorates.size()]
+			protectorates.erase(rebel)
+			var rebel_msg := "⚡ День %d — %s поднял бунт и вышел из-под контроля! Флот слишком слаб." \
+				% [day, rebel.get("name", "?")]
+			hq_attack_log.append(rebel_msg)
+			if hq_attack_log.size() > 10:
+				hq_attack_log.remove_at(0)
+			print("[Rebellion] " + rebel_msg)
 	print("[GameManager] Day %d" % day)
 
 func add_cargo(item: String, qty: int) -> bool:
@@ -214,12 +278,13 @@ func faction_leave() -> void:
 		faction_leader_of = ""
 	player_faction = ""
 
-func faction_create(fname: String) -> bool:
+func faction_create(fname: String, hq_system: String = "") -> bool:
 	if player_faction != "": return false
 	if fname.strip_edges().is_empty(): return false
 	if not spend_credits(FACTION_CREATE_COST): return false
 	faction_leader_of = fname
 	player_faction = fname
+	faction_hq_system = hq_system
 	faction_reputation[fname] = 50
 	return true
 
@@ -254,6 +319,56 @@ func get_score() -> int:
 	return int(credits * 0.05) + total_damage_dealt / 10 + \
 		   total_ships_destroyed * 500 + total_battles_won * 2000 + day * 50
 
+# ── Флот и война ─────────────────────────────────────────────────────────────
+
+func get_fleet_strength() -> int:
+	var s := 0
+	for ally in faction_allies:
+		s += ALLY_SHIP_STRENGTH.get(ally.get("ship", ""), 2)
+	return s
+
+func count_fleet_dreadnoughts() -> int:
+	var n := 0
+	for ally in faction_allies:
+		if ally.get("ship", "") == "Дредноут":
+			n += 1
+	return n
+
+func declare_war(faction: String) -> bool:
+	if faction_leader_of.is_empty(): return false
+	if faction in war_targets: return false
+	if faction == player_faction: return false
+	war_targets.append(faction)
+	change_reputation(faction, -40)
+	print("[War] Война объявлена фракции: " + faction)
+	return true
+
+func end_war(faction: String) -> void:
+	war_targets.erase(faction)
+
+func conquer_system(system_name: String, system_faction: String, base_income: int) -> void:
+	for p in protectorates:
+		if p["name"] == system_name:
+			return  # уже завоёвана
+	protectorates.append({
+		"name":              system_name,
+		"faction":           system_faction,
+		"income":            base_income,
+		"garrison_strength": PROTECTORATE_GARRISON_STRENGTH,
+	})
+	var msg := "🏴 День %d — %s завоёвана! Протекторат. Доход: +%d кред./день." \
+		% [day, system_name, base_income]
+	hq_attack_log.append(msg)
+	if hq_attack_log.size() > 10:
+		hq_attack_log.remove_at(0)
+	print("[Conquest] " + msg)
+
+func is_protectorate(system_name: String) -> bool:
+	for p in protectorates:
+		if p["name"] == system_name:
+			return true
+	return false
+
 # ── Сохранение / Загрузка ─────────────────────────────────────────────────────
 
 const SAVE_PATH := "user://spacev_save.json"
@@ -281,8 +396,13 @@ func save_game() -> void:
 		"visited_systems": visited_systems,
 		"player_faction": player_faction,
 		"faction_leader_of": faction_leader_of,
+		"faction_hq_system": faction_hq_system,
 		"faction_allies": faction_allies,
+		"hq_attack_log": hq_attack_log,
+		"visited_galaxy_names": visited_galaxy_names,
 		"fuel": fuel, "max_fuel": max_fuel,
+		"war_targets":   war_targets,
+		"protectorates": protectorates,
 		"total_damage_dealt":    total_damage_dealt,
 		"total_damage_absorbed": total_damage_absorbed,
 		"total_ships_destroyed": total_ships_destroyed,
@@ -322,9 +442,14 @@ func load_game() -> bool:
 	visited_systems      = data.get("visited_systems",       [0])
 	player_faction       = str(data.get("player_faction",    ""))
 	faction_leader_of    = str(data.get("faction_leader_of", ""))
-	faction_allies       = data.get("faction_allies",        [])
+	faction_hq_system      = str(data.get("faction_hq_system", ""))
+	faction_allies         = data.get("faction_allies",        [])
+	hq_attack_log          = data.get("hq_attack_log",         [])
+	visited_galaxy_names   = data.get("visited_galaxy_names",  ["Sol Prime"])
 	fuel                 = float(data.get("fuel",            100.0))
 	max_fuel             = float(data.get("max_fuel",        100.0))
+	war_targets          = data.get("war_targets",           [])
+	protectorates        = data.get("protectorates",         [])
 	total_damage_dealt   = int(data.get("total_damage_dealt",    0))
 	total_damage_absorbed= int(data.get("total_damage_absorbed", 0))
 	total_ships_destroyed= int(data.get("total_ships_destroyed", 0))

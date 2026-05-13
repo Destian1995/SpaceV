@@ -516,8 +516,10 @@ func _populate_factions() -> void:
 	# Создать свою фракцию
 	_bar_list.add_child(HSeparator.new())
 	_bar_list.add_child(_lbl("СОЗДАТЬ СВОЮ ФРАКЦИЮ", 14, Color(1.0, 0.85, 0.3)))
-	_bar_list.add_child(_lbl("  Стоимость: %d кред. Ваша фракция появится в галактике." % GameManager.FACTION_CREATE_COST,
+	_bar_list.add_child(_lbl("  Стоимость: %d кред. Выберите безопасную звёздную систему для штаб-квартиры." % GameManager.FACTION_CREATE_COST,
 		12, Color(0.55, 0.55, 0.6)))
+	_bar_list.add_child(_lbl("  ⚠ Штаб можно основать только в системе без активных врагов (опасность ≤ 2, мирная фракция).",
+		12, Color(0.7, 0.6, 0.3)))
 
 	var create_row := HBoxContainer.new()
 	_bar_list.add_child(create_row)
@@ -527,6 +529,16 @@ func _populate_factions() -> void:
 	name_input.custom_minimum_size = Vector2(200, 0)
 	name_input.max_length = 30
 	create_row.add_child(name_input)
+
+	# Выбор звёздной системы для штаба (безопасные системы без врагов)
+	create_row.add_child(_lbl("  Штаб:", 14))
+	var hq_opt := OptionButton.new()
+	hq_opt.custom_minimum_size = Vector2(200, 0)
+	hq_opt.add_theme_font_size_override("font_size", 13)
+	for sys_info in HQ_ELIGIBLE_SYSTEMS:
+		hq_opt.add_item("🌟 %s  [Опасность %d]" % [sys_info["name"], sys_info["danger"]])
+	create_row.add_child(hq_opt)
+
 	var create_btn := Button.new()
 	create_btn.text = "👑  Основать (%d к.)" % GameManager.FACTION_CREATE_COST
 	create_btn.add_theme_color_override("font_color", Color(1.0, 0.88, 0.2))
@@ -534,7 +546,8 @@ func _populate_factions() -> void:
 	create_btn.pressed.connect(func():
 		var fname: String = name_input.text.strip_edges()
 		if fname.is_empty(): return
-		if GameManager.faction_create(fname):
+		var chosen_sys: String = HQ_ELIGIBLE_SYSTEMS[hq_opt.selected]["name"]
+		if GameManager.faction_create(fname, chosen_sys):
 			_populate_bar()
 			_populate_ships()
 			_populate_hq()
@@ -722,6 +735,9 @@ func _make_quest_card(q: Dictionary) -> PanelContainer:
 func _accept_quest(q: Dictionary) -> void:
 	var qd: Dictionary = q.duplicate()
 	qd["origin_faction"] = GameManager.current_faction  # фракция системы где взяли задание
+	# Сохраняем снимок прогресса для проверки выполнения боевых и временных условий
+	qd["battles_won_at_accept"] = GameManager.total_battles_won
+	qd["day_at_accept"] = GameManager.day
 	GameManager.active_quests.append(qd)
 	print("[Spaceport] Quest accepted: %s" % q["title"])
 	_populate_quests()
@@ -1330,6 +1346,21 @@ func _buy_upgrade(uid: String, price: int) -> void:
 
 # ── Faction HQ ───────────────────────────────────────────────────────────────
 
+# Безопасные системы для штаба фракции: опасность ≤ 2, мирная фракция (не Пираты, не Пустота)
+const HQ_ELIGIBLE_SYSTEMS := [
+	{"name": "Sol Prime",       "danger": 1, "faction": "Федерация"},
+	{"name": "Krath Station",   "danger": 2, "faction": "Федерация"},
+	{"name": "Auren Gate",      "danger": 2, "faction": "Торговцы"},
+	{"name": "Nova Reach",      "danger": 2, "faction": "Независимые"},
+	{"name": "Helion Crossing", "danger": 2, "faction": "Торговцы"},
+	{"name": "Pax Harbor",      "danger": 1, "faction": "Федерация"},
+	{"name": "Silk Route",      "danger": 2, "faction": "Торговцы"},
+	{"name": "Drift Market",    "danger": 2, "faction": "Торговцы"},
+	{"name": "Echo Station",    "danger": 2, "faction": "Независимые"},
+	{"name": "Relay Point",     "danger": 2, "faction": "Независимые"},
+	{"name": "Hyperion Falls",  "danger": 2, "faction": "Независимые"},
+]
+
 const HQ_ALLY_SHIPS := [
 	{"name": "Перехватчик", "icon": "✈", "cost": 8000,  "income": 120,
 	 "desc": "Лёгкий истребитель. Быстрый, небольшой доход."},
@@ -1347,6 +1378,13 @@ const HQ_ALLY_NAMES := [
 	"Боец Астра", "Сержант Волк", "Агент Тень", "Пилот Зар",
 ]
 
+func _count_hq_allies() -> int:
+	var n: int = 0
+	for a in GameManager.faction_allies:
+		if a.get("location", "hq") == "hq":
+			n += 1
+	return n
+
 func _populate_hq() -> void:
 	_clear(_hq_list)
 
@@ -1358,15 +1396,39 @@ func _populate_hq() -> void:
 			16, Color(0.55, 0.55, 0.6)))
 		return
 
-	var fname: String = GameManager.faction_leader_of
+	var fname:  String = GameManager.faction_leader_of
+	var hq_sys: String = GameManager.faction_hq_system
+	var at_hq:  bool   = (hq_sys != "" and GameManager.current_galaxy == hq_sys)
+
 	_hq_list.add_child(_lbl("🏛  ШТАБ ФРАКЦИИ «%s»" % fname.to_upper(), 22, Color(0.95, 0.82, 0.2)))
+
+	# Штаб-квартира
+	if hq_sys != "":
+		var hq_col := Color(0.3, 1.0, 0.55) if at_hq else Color(0.6, 0.7, 0.9)
+		_hq_list.add_child(_lbl(
+			"📍 Штаб-квартира: %s%s" % [hq_sys, "  ← ВЫ ЗДЕСЬ" if at_hq else ""],
+			14, hq_col))
+
+	# ── Лог атак на штаб ────────────────────────────────────────────────────────
+	if not GameManager.hq_attack_log.is_empty():
+		_hq_list.add_child(HSeparator.new())
+		_hq_list.add_child(_lbl("📋  ЖУРНАЛ СОБЫТИЙ ФЛОТА", 15, Color(1.0, 0.75, 0.2)))
+		for entry in GameManager.hq_attack_log:
+			var is_victory: bool = entry.begins_with("✅")
+			var is_dead:    bool = entry.begins_with("💀")
+			var entry_col := Color(0.35, 0.95, 0.45) if is_victory else \
+				(Color(1.0, 0.2, 0.2) if is_dead else Color(0.9, 0.5, 0.35))
+			var el := _lbl(entry, 13, entry_col)
+			el.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			_hq_list.add_child(el)
+
 	_hq_list.add_child(HSeparator.new())
 
-	# ── Overview ──
+	# ── Обзор фракции ───────────────────────────────────────────────────────────
 	var allies: Array = GameManager.faction_allies
 	var total_income: int = 0
-	for a in allies:
-		total_income += int(a.get("income", 0))
+	for a in allies: total_income += int(a.get("income", 0))
+	var at_hq_count: int = _count_hq_allies()
 
 	var ov_hb := HBoxContainer.new()
 	_hq_list.add_child(ov_hb)
@@ -1390,93 +1452,284 @@ func _populate_hq() -> void:
 	var rep_val: int = GameManager.faction_reputation.get(fname, 0)
 	ov_r.add_child(_lbl("%d / 100" % rep_val, 22, Color(1.0, 0.6, 0.2)))
 
+	# Статус патруля в штабе
+	var patrol_col := Color(0.3, 1.0, 0.55) if at_hq_count >= 3 else Color(1.0, 0.4, 0.3)
+	var patrol_txt := "🛡 В штабе патрулируют: %d кораблей%s" % [
+		at_hq_count,
+		"" if at_hq_count >= 3 else "  ⚠ КРИТИЧЕСКИ МАЛО (минимум 3)!"]
+	_hq_list.add_child(_lbl(patrol_txt, 14, patrol_col))
+
+	# Предупреждение о враждебных фракциях
+	var hostile_count: int = 0
+	for f in GameManager.faction_reputation:
+		if GameManager.faction_reputation.get(f, 0) < -30 and f != fname and f != "Нет":
+			hostile_count += 1
+	if hostile_count > 0:
+		_hq_list.add_child(_lbl(
+			"⚔ %d враждебных фракций могут атаковать штаб!" % hostile_count,
+			13, Color(1.0, 0.55, 0.2)))
+
 	_hq_list.add_child(HSeparator.new())
 
-	# ── Recruit section ──
+	# Управление флотом — только в штабе
+	if not at_hq:
+		_hq_list.add_child(_lbl("⚠  УПРАВЛЕНИЕ ФЛОТОМ", 16, Color(0.9, 0.6, 0.2)))
+		_hq_list.add_child(_lbl(
+			"Командовать флотом можно только находясь в штабе (%s).\nПрибудьте в штаб чтобы давать указания кораблям." % hq_sys,
+			13, Color(0.6, 0.6, 0.65)))
+		_hq_list.add_child(HSeparator.new())
+
+	# ── Протектораты ─────────────────────────────────────────────────────────────
+	_hq_list.add_child(_lbl("🏴  ПРОТЕКТОРАТЫ", 18, Color(1.0, 0.72, 0.1)))
+	if GameManager.protectorates.is_empty():
+		_hq_list.add_child(_lbl(
+			"Нет завоёванных систем.\nОбъявите войну фракции и введите флот (≥7 кораблей, ≥3 дредноута).",
+			13, Color(0.55, 0.55, 0.62)))
+	else:
+		# Расчёт сил для предупреждения о бунте
+		var fleet_str: int = GameManager.get_fleet_strength()
+		var total_prot_str: int = 0
+		for p in GameManager.protectorates:
+			total_prot_str += int(p.get("garrison_strength", GameManager.PROTECTORATE_GARRISON_STRENGTH))
+		var rebellion_risk: bool = fleet_str <= int(total_prot_str * (1.0 + GameManager.REBELLION_SURPLUS_PCT))
+		if rebellion_risk:
+			var rb := _lbl(
+				"⚡ ВНИМАНИЕ: Флот (%d ед.) недостаточно превосходит гарнизоны протекторатов (%d ед.)!\n  Возможен бунт! Наймите больше кораблей." % [fleet_str, total_prot_str],
+				13, Color(1.0, 0.3, 0.2))
+			rb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			_hq_list.add_child(rb)
+		var total_prot_income: int = 0
+		for prot in GameManager.protectorates:
+			total_prot_income += int(prot.get("income", 0))
+			var pc := PanelContainer.new()
+			pc.custom_minimum_size = Vector2(0, 52)
+			var phb := HBoxContainer.new()
+			pc.add_child(phb)
+			var pico := _lbl("🏴", 24)
+			pico.custom_minimum_size = Vector2(36, 0)
+			phb.add_child(pico)
+			var pvb := VBoxContainer.new()
+			pvb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			phb.add_child(pvb)
+			pvb.add_child(_lbl(prot["name"], 16))
+			pvb.add_child(_lbl("Бывш. фракция: %s  |  Гарнизон: %d ед." % [prot.get("faction","?"), prot.get("garrison_strength", 0)], 12, Color(0.6,0.6,0.7)))
+			var inc_lbl := _lbl("+%d кред./день" % prot.get("income", 0), 14, Color(0.3, 1.0, 0.55))
+			inc_lbl.custom_minimum_size = Vector2(140, 0)
+			inc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			phb.add_child(inc_lbl)
+			_hq_list.add_child(pc)
+		_hq_list.add_child(_lbl("Итого доход протекторатов: +%d кред./день" % total_prot_income, 14, Color(0.95, 0.82, 0.2)))
+
+	_hq_list.add_child(HSeparator.new())
+
+	# ── Объявление войны ──────────────────────────────────────────────────────────
+	_hq_list.add_child(_lbl("⚔  ВОЙНА", 18, Color(1.0, 0.35, 0.25)))
+	_hq_list.add_child(_lbl(
+		"Объявление войны даёт право завоевать системы врага (-40 репутации у цели).\n" +
+		"Для завоевания нужно: ввести в систему ≥7 союзников и ≥3 дредноута, затем уничтожить врагов.",
+		12, Color(0.6, 0.55, 0.55)))
+	_hq_list.add_child(HSeparator.new())
+
+	const WAR_FACTION_ICONS := {
+		"Федерация":   "🔵",
+		"Торговцы":    "🟡",
+		"Независимые": "⚪",
+		"Пираты":      "💀",
+		"Империя":     "🔴",
+	}
+	var base_factions := ["Федерация", "Торговцы", "Независимые", "Пираты", "Империя"]
+	for wf in base_factions:
+		if wf == fname: continue   # не воевать с собой
+		var at_war: bool = wf in GameManager.war_targets
+		var rep: int = GameManager.faction_reputation.get(wf, 0)
+		var wcard := PanelContainer.new()
+		wcard.custom_minimum_size = Vector2(0, 52)
+		var whb := HBoxContainer.new()
+		wcard.add_child(whb)
+		var wico := _lbl(WAR_FACTION_ICONS.get(wf, "·"), 24)
+		wico.custom_minimum_size = Vector2(36, 0)
+		whb.add_child(wico)
+		var wvb := VBoxContainer.new()
+		wvb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		whb.add_child(wvb)
+		wvb.add_child(_lbl(wf, 16))
+		var rep_col := Color(1.0, 0.35, 0.25) if at_war else (Color(0.35, 0.95, 0.45) if rep >= 0 else Color(1.0, 0.6, 0.2))
+		wvb.add_child(_lbl(
+			("⚔ В СОСТОЯНИИ ВОЙНЫ" if at_war else "Репутация: %+d" % rep), 12, rep_col))
+		var wbtn := Button.new()
+		wbtn.custom_minimum_size = Vector2(160, 0)
+		var captured_wf: String = wf
+		if at_war:
+			wbtn.text = "🕊 Заключить мир"
+			wbtn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+			wbtn.pressed.connect(func():
+				GameManager.end_war(captured_wf)
+				_populate_hq())
+		else:
+			wbtn.text = "⚔ Объявить войну"
+			wbtn.add_theme_color_override("font_color", Color(1.0, 0.35, 0.25))
+			wbtn.pressed.connect(func():
+				GameManager.declare_war(captured_wf)
+				_populate_hq())
+		whb.add_child(wbtn)
+		_hq_list.add_child(wcard)
+
+	_hq_list.add_child(HSeparator.new())
+
+	# ── Набор союзников ─────────────────────────────────────────────────────────
 	_hq_list.add_child(_lbl("⚔  НАБОР СОЮЗНИКОВ", 18, Color(0.55, 0.85, 1.0)))
 	_hq_list.add_child(_lbl(
-		"Каждый союзник получает корабль и приносит ежедневный доход. Доход начисляется при смене дня.",
+		"Каждый союзник несёт службу в штабе и приносит ежедневный доход.",
 		13, Color(0.5, 0.55, 0.65)))
 	_hq_list.add_child(HSeparator.new())
 
 	for ship_data in HQ_ALLY_SHIPS:
 		var cost: int = ship_data["cost"]
 		var income: int = ship_data["income"]
-
 		var card := PanelContainer.new()
 		card.custom_minimum_size = Vector2(0, 80)
 		var hb := HBoxContainer.new()
 		card.add_child(hb)
-
 		var icon_l := _lbl(ship_data["icon"], 32)
 		icon_l.custom_minimum_size = Vector2(50, 0)
 		icon_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		hb.add_child(icon_l)
-
 		var info_vb := VBoxContainer.new()
 		info_vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hb.add_child(info_vb)
-
 		info_vb.add_child(_lbl(ship_data["name"], 17))
 		info_vb.add_child(_lbl(ship_data["desc"], 13, Color(0.65, 0.65, 0.65)))
 		info_vb.add_child(_lbl("💰 Доход: +%d кред./день" % income, 13, Color(0.3, 1.0, 0.55)))
-
 		var buy_vb := VBoxContainer.new()
 		buy_vb.custom_minimum_size = Vector2(160, 0)
 		hb.add_child(buy_vb)
-
 		var price_l := _lbl("%d кред." % cost, 16, Color(1.0, 0.88, 0.3))
 		price_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		buy_vb.add_child(price_l)
-
 		var recruit_btn := Button.new()
 		recruit_btn.text = "Завербовать"
 		recruit_btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
 		recruit_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		recruit_btn.disabled = GameManager.credits < cost
-		var cap_cost: int  = cost
-		var cap_inc:  int  = income
+		var cap_cost: int    = cost
+		var cap_inc:  int    = income
 		var cap_ship: String = ship_data["name"]
 		recruit_btn.pressed.connect(func(): _hq_recruit(cap_cost, cap_inc, cap_ship))
 		buy_vb.add_child(recruit_btn)
-
 		_hq_list.add_child(card)
 
-	# ── Current roster ──
+	# ── Текущий состав ──────────────────────────────────────────────────────────
 	if allies.size() > 0:
 		_hq_list.add_child(HSeparator.new())
-		_hq_list.add_child(_lbl("👥  ТЕКУЩИЙ СОСТАВ", 18, Color(0.85, 0.65, 1.0)))
+		_hq_list.add_child(_lbl("👥  ТЕКУЩИЙ СОСТАВ ФЛОТА", 18, Color(0.85, 0.65, 1.0)))
+		if at_hq:
+			_hq_list.add_child(_lbl(
+				"📡 Вы в штабе — можно командовать флотом. Минимум 3 корабля должны оставаться в штабе.",
+				12, Color(0.5, 0.75, 0.55)))
+
+		# Список посещённых систем для дислокации
+		var dest_options: Array = []
+		dest_options.append("📍 Штаб (%s)" % hq_sys)
+		for sname in GameManager.visited_galaxy_names:
+			if sname != hq_sys:
+				dest_options.append("🌐 " + sname)
+
 		for ally in allies:
-			var r := HBoxContainer.new()
-			r.custom_minimum_size = Vector2(0, 40)
-			_hq_list.add_child(r)
-			r.add_child(_lbl(ally.get("icon", "✈"), 22))
+			var ally_loc: String = ally.get("location", "hq")
+			var is_in_hq: bool  = (ally_loc == "hq")
+			var loc_display: String = ("📍 Штаб" if is_in_hq else "🌐 " + ally_loc)
+
+			var card2 := PanelContainer.new()
+			card2.custom_minimum_size = Vector2(0, 56)
+			var r := VBoxContainer.new()
+			card2.add_child(r)
+
+			# Строка 1: инфо об союзнике
+			var row1 := HBoxContainer.new()
+			r.add_child(row1)
+			var icon_col := Color(0.3, 1.0, 0.55) if is_in_hq else Color(0.6, 0.75, 1.0)
+			row1.add_child(_lbl(ally.get("icon", "✈"), 20))
 			var al := _lbl("  %s  —  %s" % [ally.get("name", "?"), ally.get("ship", "?")], 15)
 			al.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			r.add_child(al)
-			r.add_child(_lbl("+%d к./день" % int(ally.get("income", 0)), 14, Color(0.3, 1.0, 0.55)))
+			row1.add_child(al)
+			row1.add_child(_lbl(loc_display, 13, icon_col))
+			row1.add_child(_lbl("  +%d к./д" % int(ally.get("income", 0)), 13, Color(0.3, 1.0, 0.55)))
 
 			var dismiss_btn := Button.new()
 			dismiss_btn.text = "Уволить"
 			dismiss_btn.add_theme_color_override("font_color", Color(1.0, 0.4, 0.3))
-			dismiss_btn.custom_minimum_size = Vector2(90, 0)
+			dismiss_btn.custom_minimum_size = Vector2(85, 0)
 			var cap_ally: Dictionary = ally
 			dismiss_btn.pressed.connect(func(): _hq_dismiss(cap_ally))
-			r.add_child(dismiss_btn)
+			row1.add_child(dismiss_btn)
+
+			# Строка 2: дислокация (только в штабе)
+			if at_hq:
+				var row2 := HBoxContainer.new()
+				r.add_child(row2)
+				row2.add_child(_lbl("  ⇒ Передислоцировать:", 13, Color(0.6, 0.7, 0.85)))
+
+				var dest_opt := OptionButton.new()
+				dest_opt.add_theme_font_size_override("font_size", 13)
+				dest_opt.custom_minimum_size = Vector2(220, 0)
+				for opt_txt in dest_options:
+					dest_opt.add_item(opt_txt)
+				# Установить текущую локацию как выбранную
+				var cur_sel: int = 0
+				if not is_in_hq:
+					for di in dest_options.size():
+						if dest_options[di].ends_with(ally_loc):
+							cur_sel = di
+							break
+				dest_opt.selected = cur_sel
+				row2.add_child(dest_opt)
+
+				var apply_btn := Button.new()
+				apply_btn.text = "Применить"
+				apply_btn.add_theme_font_size_override("font_size", 13)
+				apply_btn.custom_minimum_size = Vector2(120, 0)
+				apply_btn.add_theme_color_override("font_color", Color(0.3, 0.9, 0.6))
+
+				var cap_ally2: Dictionary = ally
+				var cap_opt: OptionButton = dest_opt
+				var cap_hq_count: int = at_hq_count
+				apply_btn.pressed.connect(func():
+					var sel_idx: int = cap_opt.selected
+					var new_loc: String
+					if sel_idx == 0:
+						new_loc = "hq"
+					else:
+						# Извлекаем имя системы (убираем иконку)
+						new_loc = dest_options[sel_idx].trim_prefix("🌐 ")
+					var cur_loc: String = cap_ally2.get("location", "hq")
+					# Проверка минимума 3 в штабе при уводе из штаба
+					if cur_loc == "hq" and new_loc != "hq" and cap_hq_count <= 3:
+						return  # нельзя убрать — осталось бы меньше 3
+					cap_ally2["location"] = new_loc
+					_populate_hq()
+					_refresh_credits())
+				# Если пытаемся убрать из штаба и осталось бы < 3 — заблокировать кнопку визуально
+				# (пересчитываем при рендере)
+				if is_in_hq and at_hq_count <= 3:
+					apply_btn.disabled = true
+					apply_btn.tooltip_text = "Нельзя: в штабе должно быть не менее 3 кораблей"
+				row2.add_child(apply_btn)
+
+			_hq_list.add_child(card2)
 
 func _hq_recruit(cost: int, income: int, ship_name: String) -> void:
 	if not GameManager.spend_credits(cost):
 		return
 	var idx: int = GameManager.faction_allies.size() % HQ_ALLY_NAMES.size()
 	var ally_name: String = HQ_ALLY_NAMES[idx]
-	# Find ship icon
 	var icon := "✈"
 	for sd in HQ_ALLY_SHIPS:
 		if sd["name"] == ship_name:
 			icon = sd["icon"]
 			break
+	# location: "hq" — новый союзник базируется в штабе
 	GameManager.faction_allies.append({
-		"name": ally_name, "ship": ship_name, "income": income, "icon": icon
+		"name": ally_name, "ship": ship_name, "income": income, "icon": icon, "location": "hq"
 	})
 	_populate_hq()
 	_refresh_credits()

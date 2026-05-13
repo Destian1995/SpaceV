@@ -299,7 +299,8 @@ const FACTION_NAMES := ["Федерация","Торговцы","Империя"
 const SYSTEM_NAMES := ["Vega Drift","Krath Station","Pyrox","Nova Reach","Auren Gate"]
 
 # Квесты, сдаваемые прямо в баре (без перелёта)
-const LOCAL_QUEST_IDS := ["bounty_hunt","assassination","mystery","mercenary","patrol"]
+# patrol и mystery требуют перелёта — вынесены из локальных
+const LOCAL_QUEST_IDS := ["bounty_hunt","assassination","mercenary"]
 
 # Квесты с условием наличия груза
 const CARGO_QUEST_IDS := ["cargo_delivery","smuggling","mining"]
@@ -352,12 +353,21 @@ func generate_quests(rng: RandomNumberGenerator, planet_name: String, galaxy_nam
 				conditions   = {"type": "travel", "dest_galaxy": dest_galaxy}
 			"escort","rescue","diplomacy":
 				conditions   = {"type": "travel", "dest_galaxy": dest_galaxy}
-			"exploration","patrol","data_retrieval":
+			"data_retrieval":
 				conditions   = {"type": "travel", "dest_galaxy": dest_galaxy}
+			"exploration":
+				conditions   = {"type": "travel", "dest_galaxy": dest_galaxy}
+			"patrol":
+				# Патрулирование: нужно добраться до системы и провести там 3 дня
+				conditions   = {"type": "patrol", "days_needed": 3, "dest_galaxy": dest_galaxy}
+			"mystery":
+				# Расследование: нужно добраться до системы и вступить в бой
+				conditions   = {"type": "combat_travel", "wins_needed": 1, "dest_galaxy": dest_galaxy}
 			"defense":
-				conditions   = {"type": "travel", "dest_galaxy": dest_galaxy}
-			"bounty_hunt","assassination","mercenary","mystery":
-				conditions   = {"type": "local"}  # solvable in bar at origin
+				# Оборона базы: добраться и победить врагов в бою
+				conditions   = {"type": "combat_travel", "wins_needed": 1, "dest_galaxy": dest_galaxy}
+			"bounty_hunt","assassination","mercenary":
+				conditions   = {"type": "local"}  # сдаётся в баре, но требует боевых побед
 
 		# Format description
 		var desc: String = qt["desc"]
@@ -411,13 +421,43 @@ func check_quest_conditions(q: Dictionary) -> String:
 			if have < need:
 				return "Недостаточно груза: нужно %d × %s, есть %d" % [need, item, have]
 			if dest != "" and GameManager.current_galaxy != dest:
-				return "Нужно быть в системе «%s»" % dest
+				return "Нужно доставить груз в систему «%s»" % dest
 		"travel":
 			var dest: String = cond.get("dest_galaxy", "")
 			if dest != "" and GameManager.current_galaxy != dest:
-				return "Нужно быть в системе «%s»" % dest
+				return "Нужно прибыть в систему «%s»" % dest
+		"patrol":
+			# Патрулирование: нужно оказаться в системе И провести там нужное число дней
+			var dest: String = cond.get("dest_galaxy", "")
+			if dest != "" and GameManager.current_galaxy != dest:
+				return "Нужно прибыть в систему «%s» для патрулирования" % dest
+			var day_at: int = q.get("day_at_accept", GameManager.day)
+			var days_needed: int = cond.get("days_needed", 3)
+			var days_spent: int = GameManager.day - day_at
+			if days_spent < days_needed:
+				return "Патрулируйте ещё %d дн. (прошло %d из %d)" % [days_needed - days_spent, days_spent, days_needed]
+		"combat_travel":
+			# Нужно прибыть в систему И выиграть бой
+			var dest: String = cond.get("dest_galaxy", "")
+			if dest != "" and GameManager.current_galaxy != dest:
+				return "Нужно прибыть в систему «%s»" % dest
+			var wins_at: int = q.get("battles_won_at_accept", GameManager.total_battles_won)
+			var wins_needed: int = cond.get("wins_needed", 1)
+			var wins_got: int = GameManager.total_battles_won - wins_at
+			if wins_got < wins_needed:
+				return "Выиграйте %d бой(ев) в этом секторе (выполнено %d/%d)" % [wins_needed - wins_got, wins_got, wins_needed]
 		"local":
-			pass  # always completable in bar
+			# Боевые задания в баре требуют фактической победы в бою
+			var qid: String = q.get("id", "")
+			var wins_at: int = q.get("battles_won_at_accept", GameManager.total_battles_won)
+			match qid:
+				"bounty_hunt", "assassination":
+					if GameManager.total_battles_won <= wins_at:
+						return "Победите хотя бы в одном бою чтобы выполнить задание"
+				"mercenary":
+					var wins_got: int = GameManager.total_battles_won - wins_at
+					if wins_got < 3:
+						return "Выиграйте ещё %d боёв (выполнено %d/3)" % [3 - wins_got, wins_got]
 	return ""
 
 func generate_planet_goods(rng: RandomNumberGenerator) -> Dictionary:

@@ -163,6 +163,68 @@ func _ready() -> void:
 	tree_exiting.connect(func(): GameManager.credits_changed.disconnect(_cred_cb))
 	_refresh_topbar()
 	lbl_status.text = "Текущая позиция: %s" % SYSTEMS[current_idx]["name"]
+	_add_bottom_bar()
+
+func _add_bottom_bar() -> void:
+	var bottom_panel := PanelContainer.new()
+	bottom_panel.anchor_left   = 0.0
+	bottom_panel.anchor_top    = 1.0
+	bottom_panel.anchor_right  = 1.0
+	bottom_panel.anchor_bottom = 1.0
+	bottom_panel.offset_top    = -80.0
+	bottom_panel.offset_bottom = -32.0
+	$UI.add_child(bottom_panel)
+
+	var hb := HBoxContainer.new()
+	hb.alignment = BoxContainer.ALIGNMENT_CENTER
+	hb.add_theme_constant_override("separation", 16)
+	bottom_panel.add_child(hb)
+
+	# Войти в текущую систему
+	var enter_btn := Button.new()
+	enter_btn.text = "🚀 Войти в систему"
+	enter_btn.add_theme_font_size_override("font_size", 16)
+	enter_btn.custom_minimum_size = Vector2(210, 44)
+	enter_btn.add_theme_color_override("font_color", Color(0.3, 1.0, 0.55))
+	enter_btn.pressed.connect(_on_enter)
+	hb.add_child(enter_btn)
+
+	# Корабль
+	var ship_btn2 := Button.new()
+	ship_btn2.text = "🛸 Мой корабль"
+	ship_btn2.add_theme_font_size_override("font_size", 16)
+	ship_btn2.custom_minimum_size = Vector2(180, 44)
+	ship_btn2.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/ship_view/ShipView.tscn"))
+	hb.add_child(ship_btn2)
+
+	# Сохранить игру
+	var save_btn := Button.new()
+	save_btn.text = "💾 Сохранить"
+	save_btn.add_theme_font_size_override("font_size", 16)
+	save_btn.custom_minimum_size = Vector2(160, 44)
+	save_btn.pressed.connect(func():
+		GameManager.save_game()
+		lbl_status.text = "✅ Игра сохранена!")
+	hb.add_child(save_btn)
+
+	# Активные квесты
+	var q_count: int = GameManager.active_quests.size()
+	var quest_lbl := Label.new()
+	quest_lbl.text = "📋 Квестов: %d" % q_count
+	quest_lbl.add_theme_font_size_override("font_size", 15)
+	var q_col := Color(0.3, 1.0, 0.55) if q_count > 0 else Color(0.5, 0.5, 0.6)
+	quest_lbl.add_theme_color_override("font_color", q_col)
+	quest_lbl.custom_minimum_size = Vector2(140, 0)
+	quest_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hb.add_child(quest_lbl)
+
+	# Главное меню
+	var menu_btn2 := Button.new()
+	menu_btn2.text = "☰ Меню"
+	menu_btn2.add_theme_font_size_override("font_size", 16)
+	menu_btn2.custom_minimum_size = Vector2(110, 44)
+	menu_btn2.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/main/Main.tscn"))
+	hb.add_child(menu_btn2)
 
 func _gen_background() -> void:
 	var vp := get_viewport_rect().size
@@ -340,17 +402,104 @@ func _draw_system(i: int, offset: Vector2 = Vector2.ZERO) -> void:
 		draw_string(ThemeDB.fallback_font, pos + Vector2(-14, -sz - 14),
 			"▼", HORIZONTAL_ALIGNMENT_CENTER, 30, 14, Color(0.2, 1.0, 0.4))
 
-	# Name label with shadow
-	draw_string(ThemeDB.fallback_font, pos + Vector2(-66, sz + 19),
-		s["name"], HORIZONTAL_ALIGNMENT_CENTER, 135, 13, Color(0,0,0,0.6))
-	draw_string(ThemeDB.fallback_font, pos + Vector2(-65, sz + 18),
-		s["name"], HORIZONTAL_ALIGNMENT_CENTER, 135, 13,
-		Color(col.r*0.6+0.35, col.g*0.6+0.35, col.b*0.4+0.45, 0.95))
+	# Цвет подписи зависит от уровня опасности
+	var danger_name_col: Color
+	match danger:
+		1: danger_name_col = Color(0.40, 1.00, 0.50, 0.97)   # ярко-зелёный
+		2: danger_name_col = Color(0.70, 1.00, 0.35, 0.95)   # жёлто-зелёный
+		3: danger_name_col = Color(1.00, 0.88, 0.15, 0.95)   # жёлтый
+		4: danger_name_col = Color(1.00, 0.52, 0.10, 0.97)   # оранжевый
+		_: danger_name_col = Color(1.00, 0.20, 0.20, 1.00)   # красный (5)
 
-	# Faction tag
-	draw_string(ThemeDB.fallback_font, pos + Vector2(-50, sz + 31),
-		s["faction"], HORIZONTAL_ALIGNMENT_CENTER, 105, 11,
-		Color(col.r*0.5+0.2, col.g*0.5+0.2, col.b*0.4+0.3, 0.65))
+	# Тень имени
+	draw_string(ThemeDB.fallback_font, pos + Vector2(-66, sz + 19),
+		s["name"], HORIZONTAL_ALIGNMENT_CENTER, 135, 13, Color(0, 0, 0, 0.65))
+	# Подпись имени с цветом опасности
+	draw_string(ThemeDB.fallback_font, pos + Vector2(-65, sz + 18),
+		s["name"], HORIZONTAL_ALIGNMENT_CENTER, 135, 13, danger_name_col)
+
+	# Индикатор опасности: ряд точек
+	var dot_colors := [
+		Color(0.40, 1.00, 0.50),  # 1 — зелёный
+		Color(0.70, 1.00, 0.35),  # 2 — жёлто-зелёный
+		Color(1.00, 0.88, 0.15),  # 3 — жёлтый
+		Color(1.00, 0.52, 0.10),  # 4 — оранжевый
+		Color(1.00, 0.20, 0.20),  # 5 — красный
+	]
+	var total_dots: int = 5
+	var dot_r: float = 2.8
+	var dot_spacing: float = 7.5
+	var dots_w: float = (total_dots - 1) * dot_spacing
+	var dot_base: Vector2 = pos + Vector2(-dots_w * 0.5, sz + 32)
+	for di in total_dots:
+		var dc: Color = dot_colors[di]
+		var active: bool = di < danger
+		var alpha: float = 0.92 if active else 0.18
+		draw_circle(dot_base + Vector2(di * dot_spacing, 0), dot_r, Color(dc.r, dc.g, dc.b, alpha))
+
+	# ── Протекторат: золотое кольцо и маркер ─────────────────────────────────
+	var is_protectorate: bool = GameManager.is_protectorate(s["name"])
+	if is_protectorate:
+		var pp: float = 0.50 + sin(time_e * 1.5 + float(i)) * 0.25
+		draw_circle(pos, sz + 20, Color(1.0, 0.72, 0.1, 0.06 + pp * 0.04))
+		draw_arc(pos, sz + 14, 0, TAU, 48, Color(1.0, 0.72, 0.1, pp * 0.65), 2.2)
+		for ti in 4:
+			var ta: float = ti / 4.0 * TAU + time_e * 0.35
+			var p0: Vector2 = pos + Vector2(cos(ta), sin(ta)) * (sz + 11)
+			var p1: Vector2 = pos + Vector2(cos(ta), sin(ta)) * (sz + 19)
+			draw_line(p0, p1, Color(1.0, 0.80, 0.15, pp), 1.8)
+		draw_string(ThemeDB.fallback_font, pos + Vector2(-38, -sz - 27),
+			"🏴 ПРОТЕКТОРАТ", HORIZONTAL_ALIGNMENT_LEFT, 100, 10, Color(1.0, 0.80, 0.2, 0.95))
+
+	# ── Война: красный мигающий ореол ─────────────────────────────────────────
+	var at_war: bool = (s["faction"] in GameManager.war_targets)
+	if at_war and not is_protectorate:
+		var wp: float = 0.4 + sin(time_e * 4.5 + float(i)) * 0.35
+		draw_circle(pos, sz + 18, Color(1.0, 0.1, 0.1, 0.08 + wp * 0.05))
+		draw_arc(pos, sz + 12, 0, TAU, 48, Color(1.0, 0.15, 0.15, wp * 0.7), 2.0)
+		draw_string(ThemeDB.fallback_font, pos + Vector2(-24, -sz - 27),
+			"⚔ ВОЙНА", HORIZONTAL_ALIGNMENT_LEFT, 70, 10, Color(1.0, 0.3, 0.25, 0.95))
+
+	# Faction tag — заменяем на название фракции игрока если это его штаб
+	var is_player_hq: bool = (GameManager.faction_hq_system != "" and
+		s["name"] == GameManager.faction_hq_system and
+		GameManager.faction_leader_of != "")
+	var faction_label: String
+	if is_protectorate:
+		faction_label = "🏴 " + GameManager.faction_leader_of
+	elif is_player_hq:
+		faction_label = GameManager.faction_leader_of
+	else:
+		faction_label = s["faction"]
+	var faction_tag_col: Color
+	if is_protectorate:
+		faction_tag_col = Color(1.0, 0.80, 0.15, 0.90)
+	elif is_player_hq:
+		var pulse_col: float = 0.75 + sin(time_e * 2.0 + float(i)) * 0.2
+		faction_tag_col = Color(1.0, 0.88, 0.2, pulse_col)
+	elif at_war:
+		var wp2: float = 0.55 + sin(time_e * 3.0 + float(i)) * 0.3
+		faction_tag_col = Color(1.0, 0.2, 0.2, wp2)
+	else:
+		faction_tag_col = Color(col.r*0.5+0.2, col.g*0.5+0.2, col.b*0.4+0.3, 0.65)
+	draw_string(ThemeDB.fallback_font, pos + Vector2(-50, sz + 44),
+		faction_label, HORIZONTAL_ALIGNMENT_CENTER, 105, 11, faction_tag_col)
+
+	# Маркер штаба игрока — золотое кольцо + надпись
+	if is_player_hq:
+		var hq_pulse: float = 0.55 + sin(time_e * 2.0 + float(i)) * 0.30
+		# Двойное кольцо
+		draw_arc(pos, sz + 11, 0, TAU, 48, Color(1.0, 0.88, 0.2, hq_pulse * 0.5), 3.5)
+		draw_arc(pos, sz + 15, 0, TAU, 48, Color(1.0, 0.75, 0.1, hq_pulse * 0.25), 1.5)
+		# Вращающиеся засечки
+		for ti in 6:
+			var ta: float = ti / 6.0 * TAU + time_e * 0.6
+			var p0: Vector2 = pos + Vector2(cos(ta), sin(ta)) * (sz + 9)
+			var p1: Vector2 = pos + Vector2(cos(ta), sin(ta)) * (sz + 17)
+			draw_line(p0, p1, Color(1.0, 0.92, 0.3, hq_pulse), 1.8)
+		draw_string(ThemeDB.fallback_font, pos + Vector2(-24, -sz - 27),
+			"⭐ ВАШ ШТАБ", HORIZONTAL_ALIGNMENT_LEFT, 72, 10,
+			Color(1.0, 0.88, 0.2, 0.95))
 
 	# HQ badge — diamond ring + "HQ" label
 	if s.get("is_hq", false):
@@ -432,6 +581,8 @@ func _on_enter() -> void:
 	GameManager.current_faction    = s["faction"]
 	if not current_idx in GameManager.visited_systems:
 		GameManager.visited_systems.append(current_idx)
+	if not s["name"] in GameManager.visited_galaxy_names:
+		GameManager.visited_galaxy_names.append(s["name"])
 	GameManager.current_system_dead_enemies.clear()  # новая система — враги сбрасываются
 	GameManager.save_game()
 	get_tree().change_scene_to_file("res://scenes/star_system/StarSystemView.tscn")
@@ -476,6 +627,8 @@ func _on_jump() -> void:
 		GameManager.current_faction    = s["faction"]
 		if not current_idx in GameManager.visited_systems:
 			GameManager.visited_systems.append(current_idx)
+		if not s["name"] in GameManager.visited_galaxy_names:
+			GameManager.visited_galaxy_names.append(s["name"])
 		GameManager.current_system_dead_enemies.clear()  # новая система — враги сбрасываются
 		for _d in jmp["days"]:
 			GameManager.advance_day()
